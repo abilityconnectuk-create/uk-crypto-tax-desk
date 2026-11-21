@@ -877,6 +877,76 @@ You can also use the conversion tool to convert your wallet or exchange files in
 
     bittytax_conv --format RECAP <filename>
 
+### Wallet registry and transfer matching
+
+Koinly's transaction-history CSV (the file whose header starts `Date,Type,Tag,Sending Wallet,...`) records an untagged withdrawal with an empty tag. The Koinly parser maps that row to `Gift-Sent`, which is a disposal, and an untagged deposit to `Gift-Received`. A lot of those rows are movements between your own wallets. Treated as gifts, they inflate gains.
+
+`bittytax_conv` can correct this after every file has been parsed, once per run, across all of the files you passed in. The parsers themselves are unchanged. Nothing happens unless you opt in, so other wallet and exchange files keep their existing behaviour. Rows a parser already stored as `Withdrawal` or `Deposit` (typical exchange exports, and Koinly's bulk-edit file) keep that type. They can still be paired, and the pair is listed in the summary, but their quantities are not rewritten and an unmatched withdrawal of that kind is not sent for review.
+
+Copy [`examples/wallets.example.yaml`](examples/wallets.example.yaml):
+
+```yaml
+own:
+  - label: Ledger ETH
+    chain: ethereum
+    address: "0x1111111111111111111111111111111111111111"
+  - label: Coinbase
+    account: Coinbase
+payees:
+  - label: Example processor
+    chain: ethereum
+    address: "0x2222222222222222222222222222222222222222"
+match:
+  window_hours: 24
+  amount_tolerance: "0.02"
+  amount_tolerance_abs: "0"
+token_groups:
+  - [ETH, WETH]
+  - [BTC, cbBTC]
+```
+
+- `own` — addresses and account names you beneficially control. Comparison ignores case and spaces in addresses. `chain` is checked only when the source row has a Chain, Blockchain, or Network column; otherwise the address or account name is enough. A send whose destination (`TxDest`, or the receiving-wallet column) matches is rewritten to `Withdrawal`, including a row you had tagged as a gift, spend, or charity. The sending wallet is not treated as the destination.
+- `payees` — known third parties such as a payment processor. A send to one of these stays a disposal (`Gift-Sent`, `Spend`, or `Charity-Sent`, as parsed) and is not paired with a deposit. If the same value is listed under `own` and `payees`, `own` wins.
+- `match.window_hours` — how far apart a withdrawal and a deposit may be. The default is 24 hours, in either direction. Koinly's automatic matching uses about the same window.
+- `match.amount_tolerance` — a relative band. `0.02` means 2 percent of the larger amount. A fee already recorded in the same asset (or in the same `token_groups` entry) is also an allowed difference, because the deposit is often the net amount.
+- `match.amount_tolerance_abs` — an extra absolute allowance, in units of the asset.
+- `token_groups` — symbols that may be the two sides of one move, for example wrapped or bridged tokens. The symbols on the records are not rewritten.
+
+```
+bittytax_conv --wallets wallets.yaml koinly.csv -o records.xlsx
+```
+
+`--match-transfers` runs the pairing when you have no registry file. `--transfer-window` and `--transfer-tolerance` override the YAML values for that run.
+
+What the stage changes:
+
+| Situation | Result |
+| --- | --- |
+| Destination is your own address or account | `Withdrawal` (and the matched deposit, if there is one, becomes `Deposit`) |
+| Untagged withdrawal paired with an untagged deposit, or with a `Deposit`, of the same asset or token group, in a different wallet, inside the window and tolerance | Both sides become `Withdrawal` and `Deposit`. The note says `transfer match N` |
+| Destination is a known payee | Left as a disposal |
+| Untagged withdrawal, nothing matched, not your address | Type `_Needs-Review`. It is not a gift and it is not a transfer |
+| Tag was an explicit gift, loss, cost, and the destination is not yours | Left as parsed. Not sent for review |
+| `--legacy-gift-withdrawals` | The unmatched untagged withdrawals stay `Gift-Sent` |
+
+`--legacy-gift-withdrawals` only applies together with `--wallets` or `--match-transfers`. Without those flags the tool behaves as it always has, which is the same end result for untagged Koinly withdrawals.
+
+Two extra CSV files are written next to the conversion output (or as `BittyTax_Records-transfer-summary.csv` and `BittyTax_Records-needs-review.csv` when you do not pass `-o`):
+
+- The summary lists every match and reclassification (`Action`, date, asset, amount, wallet, destination, tx hash, detail).
+- The review file lists each unmatched untagged withdrawal: date, asset, amount, wallet, destination, tx hash, and a disposition of `needs-review` or `kept-as-gift`.
+
+`_Needs-Review` is not a BittyTax transaction type. `bittytax` stops on it, which is deliberate: those rows must be edited to `Gift-Sent`, `Spend`, or `Withdrawal` before a tax calculation. The original Koinly valuation stays in the raw columns beside the row in the Excel workbook.
+
+**Fee and cost basis. Confirm this with a UK accountant.** The stage follows the existing BittyTax defaults, which are one reading of the [HMRC Cryptoassets Manual](https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual):
+
+- Moving tokens between addresses you beneficially own is not a disposal ([CRYPTO22100](https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto22100)). With `transfers_include: false` (the default), `Withdrawal` and `Deposit` are excluded from the Section 104 pool, so the pool and its cost are unchanged by the move. That is how cost basis carries across a same-symbol transfer. Buy Value and Sell Value copied from Koinly are cleared on rows this stage reclassifies, so a later run with `transfers_include: true` does not pick up Koinly's market value as consideration.
+- Crypto spent on the transfer fee is a disposal: you used tokens to pay for a service. The fee stays on the withdrawal as Fee Quantity and Fee Asset. `transfer_fee_disposal: true` (the default) makes the accounting tool record that fee as its own spend. `transfer_fee_allowable_cost: false` (the default) does not give that spend a nil gain. [CRYPTO22150](https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto22150) attaches allowable costs to a disposal, and a wallet-to-wallet move is not itself a disposal. An accountant may prefer the opposite setting. Change it in `bittytax.conf`; this stage does not override it.
+- When a disposal is reclassified and the amount sent is larger than the amount received, the withdrawal quantity is reduced to the amount received so the two legs agree. BittyTax requires the sell quantity to be the net amount when the fee asset matches the asset sent. If no fee was recorded, the difference is stored as that fee. If a same-asset fee was already recorded and it explains the difference, that fee is kept and is not applied twice. Rows that were already `Withdrawal` / `Deposit` are not adjusted.
+- A cross-symbol pair (WETH out, ETH in) does not move cost from the WETH pool into the ETH pool, because each symbol has its own pool and both legs are excluded from it. Wrapping may itself be a disposal; the manual does not say that a wrapped token is the same asset. If they should be one pool, normalise the symbol on every row before you calculate. The group is only used to decide that the two rows are one move, and the amounts are compared one-for-one.
+
+An own-address send with no matching deposit is still a `Withdrawal`. The tokens stay in the pool, which is right if you still own them, but the other wallet will not show the receipt. If that deposit is in the file and was left as `Gift-Received` (outside the window, or over the tolerance), you will double-count it: the pool keeps the tokens and the gift adds them again at market value. The summary row says that no deposit matched. Widen the window or edit that deposit to `Deposit`.
+
 ### Notes:
 1. Some exchanges only allow the export of trades. This means transaction records of deposits and withdrawals will have to be created manually, otherwise the assets will not balance.
 1. Bitfinex - when exporting your data, make sure the "*Date Format*" is set to "*DD-MM-YY*" which is the default.

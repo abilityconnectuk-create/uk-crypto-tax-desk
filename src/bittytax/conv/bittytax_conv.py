@@ -8,7 +8,7 @@ import hashlib
 import os
 import platform
 import sys
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import colorama
 from colorama import Fore
@@ -25,6 +25,7 @@ from ..version import __version__
 from .datafile import DataFile
 from .datamerge import DataMerge
 from .dataparser import DataParser
+from .datarow import DataRow
 from .exceptions import (
     DataFilenameError,
     DataFormatNotSupported,
@@ -35,6 +36,18 @@ from .exceptions import (
 from .mergers import *  # pylint: disable=wildcard-import, unused-wildcard-import
 from .output_csv import OutputCsv
 from .output_excel import OutputExcel
+from .transfer_match import (
+    format_reconciliation_message,
+    reconcile_transfers,
+    reconciliation_report_paths,
+    write_reconciliation_reports,
+)
+from .wallets import (
+    WalletRegistry,
+    WalletRegistryError,
+    load_wallet_registry,
+    override_match_settings,
+)
 
 from .parsers import *  # type: ignore[no-redef] # pylint: disable=wildcard-import, unused-wildcard-import # noqa: E501 # isort: skip
 
@@ -114,6 +127,33 @@ def main() -> None:
     )
     parser.add_argument("-s", "--sort", action="store_true", help="sort CSV output by timestamp")
     parser.add_argument("-o", dest="output_filename", type=str, help="specify the output filename")
+    parser.add_argument(
+        "--wallets",
+        type=str,
+        help="YAML registry of your own addresses and accounts, and of known payees. "
+        "Sends to your own addresses become transfers. "
+        "Withdrawals are matched to deposits.",
+    )
+    parser.add_argument(
+        "--match-transfers",
+        action="store_true",
+        help="pair withdrawals with deposits even when no wallet registry is given",
+    )
+    parser.add_argument(
+        "--transfer-window",
+        type=str,
+        help="override the transfer match window, in hours (default 24)",
+    )
+    parser.add_argument(
+        "--transfer-tolerance",
+        type=str,
+        help="override the relative amount tolerance, for example 0.02 for 2 percent",
+    )
+    parser.add_argument(
+        "--legacy-gift-withdrawals",
+        action="store_true",
+        help="leave unmatched untagged withdrawals as Gift-Sent (previous Koinly behaviour)",
+    )
 
     args = parser.parse_args()
     config.debug = args.debug
@@ -180,6 +220,8 @@ def main() -> None:
 
     if DataFile.data_files:
         DataMerge.match_merge(DataFile.data_files)
+        if args.wallets or args.match_transfers:
+            _run_transfer_reconciliation(parser, args)
 
         if args.format == CONV_FORMAT_EXCEL:
             is_macos = platform.system() == "Darwin"
@@ -193,6 +235,31 @@ def main() -> None:
     else:
         sys.stderr.write(Fore.RESET)
         parser.exit(3, f"{parser.prog}: error: no data file(s) could be processed\n")
+
+
+def _run_transfer_reconciliation(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    try:
+        registry = load_wallet_registry(args.wallets) if args.wallets else WalletRegistry()
+        override_match_settings(
+            registry.match,
+            window_hours=args.transfer_window,
+            amount_tolerance=args.transfer_tolerance,
+        )
+    except WalletRegistryError as exc:
+        sys.stderr.write(Fore.RESET)
+        parser.exit(message=f"{parser.prog}: error: {exc}\n")
+
+    rows: List[DataRow] = []
+    for data_file in DataFile.data_files_ordered:
+        rows.extend(data_file.data_rows)
+    result = reconcile_transfers(rows, registry, legacy_gifts=args.legacy_gift_withdrawals)
+    summary_path, review_path = reconciliation_report_paths(args.output_filename)
+    write_reconciliation_reports(result, summary_path, review_path)
+    sys.stderr.write(f"{Fore.WHITE}{format_reconciliation_message(result)}\n")
+    sys.stderr.write(
+        f"{Fore.WHITE}transfer summary: {Fore.YELLOW}{os.path.abspath(summary_path)}\n"
+        f"{Fore.WHITE}needs review: {Fore.YELLOW}{os.path.abspath(review_path)}\n"
+    )
 
 
 def _do_read_file(file_type: str, pathname: str, args: argparse.Namespace) -> None:

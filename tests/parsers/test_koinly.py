@@ -5,7 +5,7 @@ from bittytax.bt_types import TrType
 from bittytax.config import config
 from bittytax.conv.dataparser import DataParser
 from bittytax.conv.datarow import DataRow
-from bittytax.conv.parsers.koinly import parse_koinly_bulk_edit
+from bittytax.conv.parsers.koinly import parse_koinly, parse_koinly_bulk_edit
 
 config.ccy = "GBP"
 
@@ -145,6 +145,80 @@ def test_unknown_tag_is_unmapped() -> None:
     )
     assert data_row.t_record is not None
     assert data_row.t_record.t_type == "_SomeTag"
+
+
+TAX_HEADER = [
+    "Date",
+    "Type",
+    "Tag",
+    "Sending Wallet",
+    "Sent Amount",
+    "Sent Currency",
+    "Sent Cost Basis",
+    "Receiving Wallet",
+    "Received Amount",
+    "Received Currency",
+    "Received Cost Basis",
+    "Fee Amount",
+    "Fee Currency",
+    "Gain (GBP)",
+    "Net Value (GBP)",
+    "Fee Value (GBP)",
+    "TxSrc",
+    "TxDest",
+    "TxHash",
+    "Description",
+]
+
+
+def _parse_tax_report(**cells: str) -> DataRow:
+    parser = DataParser.match_header(TAX_HEADER, 0)
+    assert parser.all_handler is parse_koinly
+
+    values: Dict[str, str] = {col: "" for col in TAX_HEADER}
+    values.update(cells)
+    row: List[str] = [values[col] for col in TAX_HEADER]
+    data_row = DataRow(1, row, parser.in_header, "Koinly")
+    parse_koinly([data_row], parser)
+    return data_row
+
+
+def test_tax_report_untagged_withdrawal_stays_gift_sent() -> None:
+    # The parser itself keeps the historical mapping. Transfer matching is a later stage.
+    data_row = _parse_tax_report(
+        **{
+            "Date": "2024-06-01 12:00:00",
+            "Type": "crypto_withdrawal",
+            "Sending Wallet": "Exchange",
+            "Sent Amount": "1.5",
+            "Sent Currency": "ETH",
+            "Net Value (GBP)": "100",
+            "TxDest": "0x3333333333333333333333333333333333333333",
+            "TxHash": "0xabc",
+        }
+    )
+    assert data_row.t_record is not None
+    assert data_row.t_record.t_type == TrType.GIFT_SENT
+    assert data_row.t_record.sell_quantity == Decimal("1.5")
+    assert data_row.t_record.sell_asset == "ETH"
+    assert data_row.t_record.wallet == "Exchange"
+
+
+def test_tax_report_untagged_deposit_stays_gift_received() -> None:
+    data_row = _parse_tax_report(
+        **{
+            "Date": "2024-06-01 13:00:00",
+            "Type": "crypto_deposit",
+            "Receiving Wallet": "Ledger",
+            "Received Amount": "1.5",
+            "Received Currency": "ETH",
+            "Net Value (GBP)": "100",
+        }
+    )
+    assert data_row.t_record is not None
+    assert data_row.t_record.t_type == TrType.GIFT_RECEIVED
+    assert data_row.t_record.buy_quantity == Decimal("1.5")
+    assert data_row.t_record.buy_asset == "ETH"
 
 
 def test_value_falls_back_to_net_worth() -> None:

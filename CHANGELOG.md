@@ -23,6 +23,7 @@ The new `price_via_btc` config option may not exist in your config file. If it i
 - Price tool: Rate-limit was not sleeping unless running in debug.
 - Accounting tool: fixed `audit_hide_empty` filtering of empty wallet balances after staking support was added, preserving non-zero staked balances. ([#507](https://github.com/BittyTax/BittyTax/issues/507))
 ### Added
+- Conversion tool: optional wallet registry and transfer matching (`--wallets`, `--match-transfers`). Sends to your own addresses become transfers, withdrawals can be paired with deposits (including configured token groups such as WETH/ETH), and unmatched untagged withdrawals are reported for review instead of being treated as gifts. `--legacy-gift-withdrawals` keeps the previous Gift-Sent treatment.
 - Coinbase parser: added "Cash to Savings", "Savings to Cash", "Interest payout" and "Retail Simple Dust" transaction types.
 - Exodus parser: added new export format. ([#467](https://github.com/BittyTax/BittyTax/issues/467))
 - MEXC parser: added new export formats.
