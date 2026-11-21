@@ -201,7 +201,8 @@ class ImportRecords:
         try:
             t_row.parse()
         except SkippedTransaction as exc:
-            bt_tqdm_write(f"{WARNING} {exc}")
+            if exc.value != "_Possible-Spam":
+                bt_tqdm_write(f"{WARNING} {exc}")
         except TransactionParserError as exc:
             t_row.failure = exc
 

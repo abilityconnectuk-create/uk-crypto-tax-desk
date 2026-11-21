@@ -2,13 +2,17 @@
     <h2 class="warning-font">Missing cost basis ({{ missing_cost_basis|length }})</h2>
     <p>
         These disposals were larger than the Section 104 pool. The matched cost is capped at the
-        pool, so the pool cost does not go negative. The short quantity is a gain at zero cost.
+        pool, so the pool cost does not go negative. Missing cost is the pool average times the
+        short quantity when the pool had a balance, and the market value of the short quantity
+        when it did not. Proceeds are the market value of that short quantity, which is a gain
+        at zero cost.
     </p>
     <table>
         <tr>
             <th>Date</th>
             <th>Asset</th>
             <th>Quantity short</th>
+            <th>Missing cost</th>
             <th>Proceeds</th>
         </tr>
         {% for item in missing_cost_basis %}
@@ -16,6 +20,7 @@
                 <td>{{ item.date }}</td>
                 <td>{{ item.asset }}</td>
                 <td align="right">{{ item.quantity_short }}</td>
+                <td align="right">{{ item.missing_cost }}</td>
                 <td align="right">{{ item.proceeds }}</td>
             </tr>
         {% endfor %}

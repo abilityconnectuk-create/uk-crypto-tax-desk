@@ -167,8 +167,8 @@ def format_reconciliation_message(result: ReconcileResult) -> str:
     if counts.get("needs-review", 0):
         lines.append(
             f"{counts['needs-review']} unmatched row(s) are {NEEDS_REVIEW_TYPE}. "
-            "bittytax rejects that type unless you pass --review-rows disposal "
-            "or --review-rows transfer."
+            "bittytax skips that type unless you pass --review-rows market "
+            "(recommended), disposal, or transfer."
         )
     assumed = counts.get("assumed-disposal", 0) + counts.get("assumed-transfer", 0)
     if assumed:
@@ -606,7 +606,28 @@ def _assets_compatible(left: str, right: str, groups: Sequence[TokenGroup]) -> b
         return False
     if first == second:
         return True
-    return any(first in group.symbols and second in group.symbols for group in groups)
+    return _pair_group(first, second, groups) is not None
+
+
+def _pair_group(
+    left: str, right: str, groups: Sequence[TokenGroup]
+) -> Optional[Tuple[str, TokenGroup]]:
+    """Prefer a liquid pairing over a one-to-one wrap when both exist."""
+    first = left.strip().upper()
+    second = right.strip().upper()
+    wrap: Optional[TokenGroup] = None
+    for group in groups:
+        names = set(group.all_symbols())
+        if first not in names or second not in names:
+            continue
+        liquid_names = set(group.liquid_symbols)
+        if group.liquid or first in liquid_names or second in liquid_names:
+            return ("liquid", group)
+        if wrap is None and first in group.symbols and second in group.symbols:
+            wrap = group
+    if wrap is None:
+        return None
+    return ("wrap", wrap)
 
 
 def _is_spam(asset: str, registry: WalletRegistry) -> bool:
@@ -632,19 +653,12 @@ def _matches_explicit_payee(entry: RegistryEntry, row: DataRow) -> bool:
     return record.sell_quantity == Decimal(entry.amount)
 
 
-def _group_for(asset: str, groups: Sequence[TokenGroup]) -> Optional[TokenGroup]:
-    symbol = asset.strip().upper()
-    for group in groups:
-        if symbol in group.symbols:
-            return group
-    return None
-
-
 def _canonical(asset: str, settings: MatchSettings) -> str:
-    group = _group_for(asset, settings.token_groups)
-    if group is None:
-        return asset
-    return group.canonical()
+    symbol = asset.strip().upper()
+    for group in settings.token_groups:
+        if symbol in group.all_symbols():
+            return group.canonical()
+    return asset
 
 
 def _find_payee(
@@ -714,9 +728,9 @@ def _share_pools(
 
 def _convert_wrap(row: DataRow, settings: MatchSettings) -> Optional[DataRow]:
     record = row.t_record
-    group = (
-        _group_for(record.sell_asset, settings.token_groups)
-        if record is not None and record.sell_asset
+    paired = (
+        _pair_group(record.sell_asset, record.buy_asset, settings.token_groups)
+        if record is not None and record.sell_asset and record.buy_asset
         else None
     )
     quantities_ok = (
@@ -724,11 +738,8 @@ def _convert_wrap(row: DataRow, settings: MatchSettings) -> Optional[DataRow]:
         and record.t_type is TrType.TRADE
         and record.sell_quantity is not None
         and record.buy_quantity is not None
-        and bool(record.sell_asset)
-        and bool(record.buy_asset)
-        and group is not None
-        and not group.liquid
-        and _assets_compatible(record.sell_asset, record.buy_asset, settings.token_groups)
+        and paired is not None
+        and paired[0] == "wrap"
         and _amounts_close(record.sell_quantity, record.buy_quantity, settings)
     )
     if record is None or not quantities_ok:
@@ -774,11 +785,10 @@ def _mark_liquid_trade(row: DataRow, settings: MatchSettings) -> bool:
     record = row.t_record
     if not record.sell_asset or not record.buy_asset:
         return False
-    group = _group_for(record.sell_asset, settings.token_groups)
-    if group is None or not group.liquid:
+    paired = _pair_group(record.sell_asset, record.buy_asset, settings.token_groups)
+    if paired is None or paired[0] != "liquid":
         return False
-    if not _assets_compatible(record.sell_asset, record.buy_asset, settings.token_groups):
-        return False
+    group = paired[1]
     _append_note(
         record,
         f"liquid staking rebase {record.sell_asset}/{record.buy_asset} into {group.canonical()}",

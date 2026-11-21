@@ -11,8 +11,10 @@ The new `price_via_btc` config option may not exist in your config file. If it i
 ### Fixed
 - Koinly parser: amounts with thousands separators (for example 1,234.56) are parsed, and a local-currency amount keeps its quantity as the value after FX conversion.
 - Price tool: CoinGecko latest price returns no price when `current_price` is null, instead of failing the report.
-- Accounting tool: a disposal larger than the Section 104 pool no longer drives pool cost negative. The shortfall is listed as missing cost basis at zero cost.
-- Accounting tool: an unmapped transaction type is skipped with a warning instead of aborting the import.
+- Accounting tool: a disposal larger than the Section 104 pool no longer drives pool cost negative. Each short disposal is listed with both the missing cost (the pool average times the short quantity, or the market value when the pool was empty) and the proceeds of that quantity.
+- Accounting tool: an unmapped transaction type is skipped with a warning instead of aborting the import. Possible-spam rows are counted once, not warned on every row.
+- Conversion tool: a symbol can belong to one wrap group and one liquid-staking group, or a group can list `members` and `liquid_members`. Spam patterns are not stripped, so a quoted whitespace lookalike still matches.
+- Conversion tool: the needs-review warning names `--review-rows market` as well as `disposal` and `transfer`.
 - Price tool: live price requests use a connect and read timeout, and retry waits are capped. The tax report is written before holdings are valued. `--skip-holdings` skips that valuation.
 - Coinbase parser: fixed negative values for Advanced Trade Sells.
 - MEXC parser: fees for spot trades should always be the quote asset.

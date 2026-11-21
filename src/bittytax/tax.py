@@ -40,12 +40,19 @@ PRECISION = Decimal("0.00")
 
 @dataclass
 class MissingCostBasis:
-    """Quantity disposed with no pooled cost. Proceeds of that quantity are a gain."""
+    """A disposal larger than the Section 104 pool.
+
+    proceeds is the market value of the short quantity. missing_cost is the cost
+    basis those units are missing: the pool's average cost times the short
+    quantity when the pool had a balance, otherwise that same market value,
+    because there is no average to extrapolate.
+    """
 
     date: Date
     asset: AssetSymbol
     quantity_short: Decimal
     proceeds: Decimal
+    missing_cost: Decimal
 
 
 @dataclass
@@ -479,9 +486,11 @@ class TaxCalculator:  # pylint: disable=too-many-instance-attributes
             cost = fees = Decimal(0)
             removed = t.quantity
         else:
+            pool_qty = self.holdings[t.asset].quantity
+            pool_cost = self.holdings[t.asset].cost
             removed, cost, fees, shortfall = self._capped_pool_cost(t)
             if shortfall > 0:
-                self._record_missing_cost(t, shortfall)
+                self._record_missing_cost(t, shortfall, pool_qty, pool_cost)
 
         self.holdings[t.asset].subtract_tokens(removed, cost, fees, t.t_type is TrType.WITHDRAWAL)
         self._clamp_pool(t.asset)
@@ -532,17 +541,25 @@ class TaxCalculator:  # pylint: disable=too-many-instance-attributes
             fees = holding.fees if holding.fees > 0 else Decimal(0)
         return matched, cost, fees, shortfall
 
-    def _record_missing_cost(self, t: Sell, shortfall: Decimal) -> None:
+    def _record_missing_cost(
+        self, t: Sell, shortfall: Decimal, pool_qty: Decimal, pool_cost: Decimal
+    ) -> None:
         proceeds = t.proceeds if t.proceeds is not None else Decimal(0)
         short_proceeds = proceeds * shortfall / t.quantity if t.quantity else Decimal(0)
+        if pool_qty > 0 and pool_cost > 0:
+            missing_cost = pool_cost / pool_qty * shortfall
+        else:
+            # No pooled average. The missing cost basis is the market value.
+            missing_cost = short_proceeds
         self.missing_cost_basis.append(
-            MissingCostBasis(t.date(), t.asset, shortfall, short_proceeds)
+            MissingCostBasis(t.date(), t.asset, shortfall, short_proceeds, missing_cost)
         )
         bt_tqdm_write(
             f"{WARNING} Missing cost basis: {shortfall.normalize():0,f} {t.asset} "
             f"on {t.date()} is not in the pool. "
-            f"Proceeds of {config.sym()}{short_proceeds:0,.2f} {config.ccy} "
-            "are a gain at zero cost."
+            f"Missing cost {config.sym()}{missing_cost:0,.2f} {config.ccy}. "
+            f"Proceeds of the short quantity {config.sym()}{short_proceeds:0,.2f} "
+            f"{config.ccy} are a gain at zero cost."
         )
 
     @staticmethod

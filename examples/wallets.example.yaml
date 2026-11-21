@@ -46,12 +46,11 @@ match:
 # Symbols that may be two sides of one internal move. The first symbol is the
 # shared pool name when match.share_pools is true. Otherwise symbols are not rewritten.
 token_groups:
-  - [ETH, WETH]
+  # WETH is one-to-one with ETH. stETH shares the pool but is not one-to-one.
+  # An accountant must confirm the liquid member is not a disposal.
+  - members: [ETH, WETH]
+    liquid_members: [stETH]
   - [BTC, cbBTC]
-  # Non-1:1 liquid staking. Only used when match.share_pools is true.
-  # An accountant must confirm this is not a disposal.
-  - symbols: [ETH, stETH]
-    liquid: true
 
 # Lookalike and spam tickers. They are listed in possible-spam, not needs-review.
 spam:

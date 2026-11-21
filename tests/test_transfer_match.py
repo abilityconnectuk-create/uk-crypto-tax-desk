@@ -19,6 +19,7 @@ from bittytax.conv.parsers.koinly import parse_koinly
 from bittytax.conv.transfer_match import (
     NEEDS_REVIEW_TYPE,
     ReconcileResult,
+    format_reconciliation_message,
     reconcile_transfers,
     reconciliation_report_paths,
     write_reconciliation_reports,
@@ -618,6 +619,7 @@ def test_example_registry_loads() -> None:
     assert registry.match.amount_tolerance == Decimal("0.02")
     assert registry.match.share_pools is False
     assert registry.match.token_groups[0].symbols == ("ETH", "WETH")
+    assert registry.match.token_groups[0].liquid_symbols == ("STETH",)
     assert registry.match.token_groups[1].symbols == ("BTC", "CBBTC")
 
 
@@ -941,3 +943,70 @@ def test_liquid_staking_group_keeps_the_original_symbol_in_the_note() -> None:
     assert trade.t_record.buy_asset == "ETH"
     assert "liquid staking rebase ETH/stETH into ETH" in trade.t_record.note
     assert "liquid-stake" in _actions(result)
+
+
+def test_eth_in_a_wrap_group_and_a_liquid_group_recognises_steth() -> None:
+    trade = _make(TrType.TRADE, BASE, "stETH", "0.8", "Wallet")
+    assert trade.t_record is not None
+    trade.t_record.sell_asset = "ETH"
+    trade.t_record.sell_quantity = Decimal("1")
+    trade.t_record.buy_asset = "stETH"
+    trade.t_record.buy_quantity = Decimal("0.8")
+    rows = [trade]
+    registry = _registry(share_pools=True)
+    registry.match.token_groups = [
+        TokenGroup(("ETH", "WETH")),
+        TokenGroup(("ETH", "STETH"), liquid=True),
+    ]
+    reconcile_transfers(rows, registry, containers=[rows])
+    assert trade.t_record.t_type is TrType.TRADE
+    assert "liquid staking rebase ETH/stETH into ETH" in trade.t_record.note
+    assert trade.t_record.buy_asset == "ETH"
+
+
+def test_yaml_members_and_liquid_members_mark_steth(tmp_path: Path) -> None:
+    path = tmp_path / "wallets.yaml"
+    path.write_text(
+        "match:\n  share_pools: true\n"
+        "token_groups:\n"
+        "  - members: [ETH, WETH]\n"
+        "    liquid_members: [stETH]\n",
+        encoding="utf-8",
+    )
+    registry = load_wallet_registry(str(path))
+    trade = _make(TrType.TRADE, BASE, "stETH", "0.8", "Wallet")
+    assert trade.t_record is not None
+    trade.t_record.sell_asset = "ETH"
+    trade.t_record.sell_quantity = Decimal("1")
+    trade.t_record.buy_asset = "stETH"
+    trade.t_record.buy_quantity = Decimal("0.8")
+    rows = [trade]
+    reconcile_transfers(rows, registry, containers=[rows])
+    assert "liquid staking rebase ETH/stETH into ETH" in trade.t_record.note
+    assert trade.t_record.buy_asset == "ETH"
+    assert trade.t_record.t_type is TrType.TRADE
+
+
+def test_spam_pattern_keeps_a_whitespace_lookalike(tmp_path: Path) -> None:
+    hair = "\u200a"
+    path = tmp_path / "wallets.yaml"
+    path.write_text(
+        'spam:\n  patterns:\n    - "' + hair + '"\n    - " "\n',
+        encoding="utf-8",
+    )
+    registry = load_wallet_registry(str(path))
+    assert hair in registry.spam_patterns
+    assert " " in registry.spam_patterns
+    sent = _make(TrType.GIFT_SENT, BASE, f"USD{hair}T", "1", "Exchange", destination=OTHER)
+    result = _run(sent, registry=registry)
+    assert sent.t_record is not None
+    assert str(sent.t_record.t_type) == "_Possible-Spam"
+    assert result.spam[0].disposition == "possible-spam"
+
+
+def test_converter_warning_recommends_market() -> None:
+    sent = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Exchange", destination=OTHER)
+    result = _run(sent)
+    message = format_reconciliation_message(result)
+    assert "--review-rows market" in message
+    assert "recommended" in message

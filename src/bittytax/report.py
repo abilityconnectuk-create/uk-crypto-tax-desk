@@ -268,6 +268,7 @@ class ReportLog:
                 print(
                     f"{Fore.WHITE}{item.date} {item.asset} "
                     f"short {item.quantity_short.normalize():0,f} "
+                    f"missing cost {config.sym()}{item.missing_cost:0,.2f} {config.ccy} "
                     f"proceeds {config.sym()}{item.proceeds:0,.2f} {config.ccy}"
                 )
         if self.liquid_staking:

@@ -30,7 +30,7 @@ def _run(*transactions: object) -> TaxCalculator:
 
 
 def test_over_disposal_does_not_make_pool_cost_negative() -> None:
-    calculator = _run(_buy("1", "100", 1), _sell("5", "500", 1))
+    calculator = _run(_buy("1", "100", 1), _sell("5", "1000", 1))
     holding = calculator.holdings[AssetSymbol("ETH")]
     assert holding.quantity == 0
     assert holding.cost == 0
@@ -39,7 +39,8 @@ def test_over_disposal_does_not_make_pool_cost_negative() -> None:
     missing = calculator.missing_cost_basis[0]
     assert missing.asset == "ETH"
     assert missing.quantity_short == Decimal("4")
-    assert missing.proceeds == Decimal("400")
+    assert missing.proceeds == Decimal("800")
+    assert missing.missing_cost == Decimal("400")
     assert missing.date == datetime(2024, 6, 1, tzinfo=TZ_UTC).date()
     events = [
         event
@@ -48,7 +49,19 @@ def test_over_disposal_does_not_make_pool_cost_negative() -> None:
         if isinstance(event, TaxEventCapitalGains)
     ]
     assert events[-1].cost == Decimal("100.00")
-    assert events[-1].proceeds == Decimal("500.00")
+    assert events[-1].proceeds == Decimal("1000.00")
+
+
+def test_empty_pool_reports_proceeds_and_the_same_missing_cost() -> None:
+    calculator = _run(_sell("2", "80", 1))
+    holding = calculator.holdings[AssetSymbol("ETH")]
+    assert holding.quantity == 0
+    assert holding.cost == 0
+    assert len(calculator.missing_cost_basis) == 1
+    missing = calculator.missing_cost_basis[0]
+    assert missing.quantity_short == Decimal("2")
+    assert missing.proceeds == Decimal("80")
+    assert missing.missing_cost == Decimal("80")
 
 
 def test_disposal_inside_the_pool_has_no_missing_cost() -> None:

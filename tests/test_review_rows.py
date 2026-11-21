@@ -2,9 +2,11 @@ from decimal import Decimal
 
 import pytest
 
+from bittytax.bittytax import _warn_review_rows
 from bittytax.bt_types import TrType
 from bittytax.config import config
 from bittytax.exceptions import SkippedTransaction
+from bittytax.import_records import ImportRecords
 from bittytax.t_row import TransactionRow
 
 
@@ -86,3 +88,29 @@ def test_note_marks_a_row_already_rewritten_by_the_converter() -> None:
     finally:
         config.config["review_rows"] = previous
         TransactionRow.review_assumed_count = 0
+
+
+def test_possible_spam_prints_one_summary(capsys: pytest.CaptureFixture[str]) -> None:
+    TransactionRow.skipped_spam_count = 0
+    TransactionRow.skipped_unmapped_count = 0
+    importer = ImportRecords()
+    try:
+        for _ in range(3):
+            values = {column: "" for column in TransactionRow.HEADER}
+            values["Type"] = "_Possible-Spam"
+            values["Timestamp"] = "2024-06-01T12:00:00"
+            values["Sell Quantity"] = "1"
+            values["Sell Asset"] = "SCAM"
+            row = TransactionRow([values[column] for column in TransactionRow.HEADER], 2)
+            importer._parse_imported_row(row)  # pylint: disable=protected-access
+        during = capsys.readouterr()
+        assert "_Possible-Spam" not in during.out
+        assert "_Possible-Spam" not in during.err
+        assert TransactionRow.skipped_spam_count == 3
+        _warn_review_rows()
+        summary = capsys.readouterr().out
+        assert summary.count("\n") == 1
+        assert "3 possible-spam" in summary
+    finally:
+        TransactionRow.skipped_spam_count = 0
+        TransactionRow.skipped_unmapped_count = 0

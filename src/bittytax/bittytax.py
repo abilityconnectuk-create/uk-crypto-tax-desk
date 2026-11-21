@@ -282,11 +282,18 @@ def _warn_review_rows() -> None:
             f"{WARNING} {skipped} unmapped transaction(s) were skipped. "
             "They are not in this calculation. Re-run with --review-rows market to include them."
         )
+    spam = TransactionRow.skipped_spam_count
+    if spam:
+        print(
+            f"{WARNING} {spam} possible-spam transaction(s) were skipped. "
+            "They are listed in the possible-spam file, not in this calculation."
+        )
 
 
 def _do_import(filename: str) -> List[TransactionRecord]:
     TransactionRow.review_assumed_count = 0
     TransactionRow.skipped_unmapped_count = 0
+    TransactionRow.skipped_spam_count = 0
     import_records = ImportRecords()
 
     if filename:

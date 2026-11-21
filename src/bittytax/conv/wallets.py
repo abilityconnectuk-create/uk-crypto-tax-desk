@@ -30,15 +30,21 @@ class RegistryEntry:
 class TokenGroup:
     """Symbols that may be one holding. The first symbol is the shared-pool name.
 
-    liquid=True is for non-1:1 tokens such as stETH. Cost is carried and the
-    quantity changes, but that is not a one-to-one wrap. An accountant must confirm it.
+    symbols are one-to-one with each other. liquid_symbols share that pool but are
+    not one-to-one (stETH under ETH). liquid=True marks every symbol as not one-to-one.
+    A symbol may also sit in a separate wrap group and a separate liquid group.
     """
 
     symbols: Tuple[str, ...]
     liquid: bool = False
+    liquid_symbols: Tuple[str, ...] = ()
 
     def canonical(self) -> str:
         return self.symbols[0]
+
+    def all_symbols(self) -> Tuple[str, ...]:
+        extra = tuple(symbol for symbol in self.liquid_symbols if symbol not in self.symbols)
+        return self.symbols + extra
 
 
 @dataclass
@@ -247,22 +253,35 @@ def _load_token_groups(value: object) -> List[TokenGroup]:
 
 
 def _load_one_group(group: object, index: int) -> TokenGroup:
+    if isinstance(group, list):
+        return TokenGroup(symbols=tuple(_symbol_list(group, index)))
+    item = _require_mapping(group, f"token_groups[{index}]")
+    unknown = set(item) - {"symbols", "liquid", "members", "liquid_members"}
+    if unknown:
+        names = ", ".join(sorted(str(name) for name in unknown))
+        raise WalletRegistryError(f"token_groups[{index}] has unknown keys: {names}")
+    if "members" in item or "liquid_members" in item:
+        members = _symbol_list(item.get("members") or item.get("symbols") or [], index)
+        liquid_raw = item.get("liquid_members")
+        liquid_members = _symbol_list(liquid_raw, index) if liquid_raw else []
+        return TokenGroup(symbols=tuple(members), liquid_symbols=tuple(liquid_members))
+    if "symbols" not in item:
+        raise WalletRegistryError(f"token_groups[{index}] needs symbols")
     liquid = False
-    raw_symbols: object = group
-    if isinstance(group, dict):
-        if "symbols" not in group:
-            raise WalletRegistryError(f"token_groups[{index}] needs symbols")
-        raw_symbols = group["symbols"]
-        if "liquid" in group:
-            liquid = _parse_bool(group["liquid"], f"token_groups[{index}].liquid")
-    if not isinstance(raw_symbols, list) or not raw_symbols:
+    if "liquid" in item:
+        liquid = _parse_bool(item["liquid"], f"token_groups[{index}].liquid")
+    return TokenGroup(symbols=tuple(_symbol_list(item["symbols"], index)), liquid=liquid)
+
+
+def _symbol_list(value: object, index: int) -> List[str]:
+    if not isinstance(value, list) or not value:
         raise WalletRegistryError(f"token_groups[{index}] must be a non-empty list of symbols")
     symbols = []
-    for symbol in raw_symbols:
+    for symbol in value:
         if not isinstance(symbol, str) or not symbol.strip():
             raise WalletRegistryError(f"token_groups[{index}] symbols must be strings")
         symbols.append(symbol.strip().upper())
-    return TokenGroup(symbols=tuple(symbols), liquid=liquid)
+    return symbols
 
 
 def _load_spam(value: object) -> Tuple[List[str], List[str]]:
@@ -273,9 +292,23 @@ def _load_spam(value: object) -> Tuple[List[str], List[str]]:
     if unknown:
         names = ", ".join(sorted(str(name) for name in unknown))
         raise WalletRegistryError(f"spam has unknown keys: {names}")
-    return _string_list(item.get("symbols"), "spam.symbols"), [
-        pattern.casefold() for pattern in _string_list(item.get("patterns"), "spam.patterns")
-    ]
+    return _string_list(item.get("symbols"), "spam.symbols"), _pattern_list(
+        item.get("patterns"), "spam.patterns"
+    )
+
+
+def _pattern_list(value: object, name: str) -> List[str]:
+    """Keep whitespace, including a hair space. Only a truly empty string is rejected."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise WalletRegistryError(f"{name} must be a list of strings")
+    patterns = []
+    for item in value:
+        if not isinstance(item, str) or item == "":
+            raise WalletRegistryError(f"{name} entries must be non-empty strings")
+        patterns.append(item.casefold())
+    return patterns
 
 
 def _string_list(value: object, name: str) -> List[str]:

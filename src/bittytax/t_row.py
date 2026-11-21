@@ -56,6 +56,7 @@ class TransactionRow:
     REVIEW_NOTE = "review row treated as"
     review_assumed_count = 0
     skipped_unmapped_count = 0
+    skipped_spam_count = 0
 
     HEADER = [
         "Type",
@@ -566,7 +567,7 @@ class TransactionRow:
 
     def _review_override(self, exc: ValueError, raw: str) -> TrType:
         if raw == "_Possible-Spam":
-            TransactionRow.skipped_unmapped_count += 1
+            TransactionRow.skipped_spam_count += 1
             raise SkippedTransaction(self.HEADER.index("Type"), "Type", raw) from exc
         treatment = str(config.review_rows)
         has_buy = bool(self.row_dict["Buy Quantity"] or self.row_dict["Buy Asset"])
