@@ -1,0 +1,7 @@
+{% if review_count %}
+    <h2 class="warning-font">
+        Warning: {{ review_count }} needs-review transaction(s) were treated as {{ review_treatment }}.
+        Confirm each one before relying on this report. Transfers can hide real disposals.
+        Disposals can overstate gains.
+    </h2>
+{% endif %}

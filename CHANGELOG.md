@@ -9,6 +9,13 @@ The price data cache format has been updated to correctly distinguish assets tha
 The new `price_via_btc` config option may not exist in your config file. If it is missing, BittyTax keeps the legacy BTC-intermediate behaviour for backward compatibility. Add `price_via_btc: False` to your config if you want historic prices to use direct local currency lookups.
 
 ### Fixed
+- Koinly parser: amounts with thousands separators (for example 1,234.56) are parsed, and a local-currency amount keeps its quantity as the value after FX conversion.
+- Price tool: CoinGecko latest price returns no price when `current_price` is null, instead of failing the report.
+- Accounting tool: a disposal larger than the Section 104 pool no longer drives pool cost negative. Each short disposal is listed with both the missing cost (the pool average times the short quantity, or the market value when the pool was empty) and the proceeds of that quantity.
+- Accounting tool: an unmapped transaction type is skipped with a warning instead of aborting the import. Possible-spam rows are counted once, not warned on every row.
+- Conversion tool: a symbol can belong to one wrap group and one liquid-staking group, or a group can list `members` and `liquid_members`. Spam patterns are not stripped, so a quoted whitespace lookalike still matches.
+- Conversion tool: the needs-review warning names `--review-rows market` as well as `disposal` and `transfer`.
+- Price tool: live price requests use a connect and read timeout, and retry waits are capped. The tax report is written before holdings are valued. `--skip-holdings` skips that valuation.
 - Coinbase parser: fixed negative values for Advanced Trade Sells.
 - MEXC parser: fees for spot trades should always be the quote asset.
 - Coinbase parser: fixed regex to ignore extra descriptions at end of trades.
@@ -23,6 +30,8 @@ The new `price_via_btc` config option may not exist in your config file. If it i
 - Price tool: Rate-limit was not sleeping unless running in debug.
 - Accounting tool: fixed `audit_hide_empty` filtering of empty wallet balances after staking support was added, preserving non-zero staked balances. ([#507](https://github.com/BittyTax/BittyTax/issues/507))
 ### Added
+- Conversion tool: optional wallet registry and transfer matching (`--wallets`, `--match-transfers`). Sends to your own addresses become transfers, withdrawals can be paired with deposits (including configured token groups such as WETH/ETH), and unmatched untagged withdrawals and deposits are reported for review instead of being treated as gifts. `--legacy-gift-withdrawals` keeps the previous gift treatment. `--review-as` and `bittytax --review-rows` can still produce a report, with a warning and a count. `match.share_pools` optionally pools wrapped tokens and treats a one-to-one wrap as a transfer.
+- Koinly parser: `Liquidity in`, `Liquidity out`, `Multi trade` and `Other fee` tags are mapped to known transaction types.
 - Coinbase parser: added "Cash to Savings", "Savings to Cash", "Interest payout" and "Retail Simple Dust" transaction types.
 - Exodus parser: added new export format. ([#467](https://github.com/BittyTax/BittyTax/issues/467))
 - MEXC parser: added new export formats.

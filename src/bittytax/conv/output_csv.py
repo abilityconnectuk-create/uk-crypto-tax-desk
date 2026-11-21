@@ -87,6 +87,7 @@ class OutputCsv(OutputBase):
         TrType.DIVIDEND: "Income",
         TrType.INCOME: "Income",
         TrType.GIFT_RECEIVED: "Gift",
+        TrType.REVIEW_ACQUISITION: "ReviewAcquisition",
         TrType.FORK: "Fork",
         TrType.AIRDROP: "Airdrop",
         TrType.REFERRAL: "Referral",

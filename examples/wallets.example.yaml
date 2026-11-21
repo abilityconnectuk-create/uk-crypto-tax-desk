@@ -1,0 +1,61 @@
+# Copy to wallets.yaml and replace the sample values.
+# These addresses are fake. Do not put a real transaction export in this repository.
+
+own:
+  - label: Ledger ETH
+    chain: ethereum
+    address: "0x1111111111111111111111111111111111111111"
+  - label: Cold BTC
+    chain: bitcoin
+    address: "bc1qexampleexampleexampleexampleexampleexamp"
+  - label: Coinbase
+    account: Coinbase
+
+# Sends to these stay disposals and are not paired with a deposit.
+# A destination address is optional. Use description (a case-insensitive
+# substring of the row description) or wallet plus asset when TxDest is blank.
+payees:
+  - label: Example processor
+    chain: ethereum
+    address: "0x2222222222222222222222222222222222222222"
+  - label: Card spend
+    description: "card purchase"
+  - label: Exchange BTC cash-out
+    wallet: Example Exchange
+    asset: BTC
+  - label: One withdrawal
+    tx_hash: "0xexamplehash"
+  - label: One dated withdrawal
+    date: "2024-06-01"
+    asset: ETH
+    amount: "1.5"
+
+match:
+  # Koinly's default window is about 24 hours.
+  window_hours: 24
+  # 0.02 means the amounts may differ by 2% of the larger amount.
+  amount_tolerance: "0.02"
+  # Extra absolute allowance, in units of the asset. "0" disables it.
+  amount_tolerance_abs: "0"
+  # Opt in only after an accountant agrees. When true, the first symbol in each
+  # token group is the shared Section 104 pool, and a trade of about 1:1 inside
+  # the group (a wrap or unwrap) becomes a transfer rather than a disposal.
+  # HMRC has not said that wrapping is not a disposal.
+  share_pools: false
+
+# Symbols that may be two sides of one internal move. The first symbol is the
+# shared pool name when match.share_pools is true. Otherwise symbols are not rewritten.
+token_groups:
+  # WETH is one-to-one with ETH. stETH shares the pool but is not one-to-one.
+  # An accountant must confirm the liquid member is not a disposal.
+  - members: [ETH, WETH]
+    liquid_members: [stETH]
+  - [BTC, cbBTC]
+
+# Lookalike and spam tickers. They are listed in possible-spam, not needs-review.
+spam:
+  symbols:
+    - USDT.e
+    - USDC.e
+  patterns:
+    - claim

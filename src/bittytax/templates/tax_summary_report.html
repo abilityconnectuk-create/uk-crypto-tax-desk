@@ -17,6 +17,9 @@
             <pdf:nexttemplate name="default-portrait" />
         {% endif %}
         <pdf:nextpage />
+        {% include "review_warning.html" %}
+        {% include "missing_cost_basis.html" %}
+        {% include "liquid_staking.html" %}
         {% for tax_year in tax_report|sort %}
             <h1 class="tax-year">Tax Year - {{ config.format_tax_year(tax_year) }}</h1>
             <h2 class="date-range">

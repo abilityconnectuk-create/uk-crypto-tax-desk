@@ -15,10 +15,10 @@ from .constants import TZ_UTC
 from .exceptions import (
     DataValueError,
     MissingDataError,
+    SkippedTransaction,
     TimestampParserError,
     TransactionParserError,
     UnexpectedDataError,
-    UnexpectedTransactionTypeError,
 )
 from .t_record import TransactionRecord
 from .tax import TaxCalculator
@@ -52,6 +52,12 @@ class TxRaw:
 
 
 class TransactionRow:
+    NEEDS_REVIEW_TYPE = "_Needs-Review"
+    REVIEW_NOTE = "review row treated as"
+    review_assumed_count = 0
+    skipped_unmapped_count = 0
+    skipped_spam_count = 0
+
     HEADER = [
         "Type",
         "Buy Quantity",
@@ -166,6 +172,18 @@ class TransactionRow:
             fee_value=FieldRequired.OPTIONAL,
         ),
         TrType.GIFT_RECEIVED: FieldValidation(
+            t_type=FieldRequired.MANDATORY,
+            buy_quantity=FieldRequired.MANDATORY,
+            buy_asset=FieldRequired.MANDATORY,
+            buy_value=FieldRequired.OPTIONAL,
+            sell_quantity=FieldRequired.NOT_REQUIRED,
+            sell_asset=FieldRequired.NOT_REQUIRED,
+            sell_value=FieldRequired.NOT_REQUIRED,
+            fee_quantity=FieldRequired.OPTIONAL,
+            fee_asset=FieldRequired.OPTIONAL,
+            fee_value=FieldRequired.OPTIONAL,
+        ),
+        TrType.REVIEW_ACQUISITION: FieldValidation(
             t_type=FieldRequired.MANDATORY,
             buy_quantity=FieldRequired.MANDATORY,
             buy_asset=FieldRequired.MANDATORY,
@@ -440,12 +458,7 @@ class TransactionRow:
             # Skip empty rows
             return
 
-        try:
-            t_type = TrType(self.row_dict["Type"])
-        except ValueError as e:
-            raise UnexpectedTransactionTypeError(
-                self.HEADER.index("Type"), "Type", self.row_dict["Type"]
-            ) from e
+        t_type = self._resolve_type()
 
         buy_quantity = sell_quantity = fee_quantity = None
         buy_asset = sell_asset = fee_asset = AssetSymbol("")
@@ -528,6 +541,12 @@ class TransactionRow:
                     if not config.transfer_fee_disposal:
                         fee.disposal = False
 
+        if (
+            self.REVIEW_NOTE in self.row_dict["Note"]
+            and self.row_dict["Type"] != self.NEEDS_REVIEW_TYPE
+        ):
+            TransactionRow.review_assumed_count += 1
+
         self.t_record = TransactionRecord(
             t_type,
             buy,
@@ -538,6 +557,44 @@ class TransactionRow:
             Note(self.row_dict["Note"]),
             self,
         )
+
+    def _resolve_type(self) -> TrType:
+        raw = self.row_dict["Type"]
+        try:
+            return TrType(raw)
+        except ValueError as exc:
+            return self._review_override(exc, raw)
+
+    def _review_override(self, exc: ValueError, raw: str) -> TrType:
+        if raw == "_Possible-Spam":
+            TransactionRow.skipped_spam_count += 1
+            raise SkippedTransaction(self.HEADER.index("Type"), "Type", raw) from exc
+        treatment = str(config.review_rows)
+        has_buy = bool(self.row_dict["Buy Quantity"] or self.row_dict["Buy Asset"])
+        has_sell = bool(self.row_dict["Sell Quantity"] or self.row_dict["Sell Asset"])
+        if has_buy and has_sell:
+            TransactionRow.review_assumed_count += 1
+            return TrType.TRADE
+        if treatment not in ("disposal", "transfer", "market"):
+            TransactionRow.skipped_unmapped_count += 1
+            raise SkippedTransaction(
+                self.HEADER.index("Type"),
+                "Type",
+                f"{raw} (set review_rows to market, disposal, or transfer to include it)",
+            ) from exc
+
+        TransactionRow.review_assumed_count += 1
+        if has_sell and not has_buy:
+            if treatment == "disposal":
+                return TrType.GIFT_SENT
+            return TrType.WITHDRAWAL
+        if has_buy and not has_sell:
+            if treatment == "market":
+                return TrType.REVIEW_ACQUISITION
+            if treatment == "disposal":
+                return TrType.GIFT_RECEIVED
+            return TrType.DEPOSIT
+        raise SkippedTransaction(self.HEADER.index("Type"), "Type", raw) from exc
 
     def parse_timestamp(self) -> Timestamp:
         try:

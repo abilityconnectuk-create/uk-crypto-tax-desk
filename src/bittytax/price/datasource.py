@@ -66,6 +66,9 @@ class DataSourceBase:  # pylint: disable=too-many-instance-attributes
     DEPRECATED = False
 
     TIME_OUT = 30
+    CONNECT_TIMEOUT = 10
+    READ_TIMEOUT = 20
+    MAX_RETRY_AFTER = 15
     RATE_LIMIT = 5.0  # requests per second
     RETRIES = 3
     BACKOFF_FACTOR = 1  # seconds
@@ -174,7 +177,11 @@ class DataSourceBase:  # pylint: disable=too-many-instance-attributes
                             )
                         )
 
-                    response = session.get(url, headers=self.headers, timeout=self.TIME_OUT)
+                    response = session.get(
+                        url,
+                        headers=self.headers,
+                        timeout=(self.CONNECT_TIMEOUT, self.READ_TIMEOUT),
+                    )
                     self._handle_response(response, url)
 
                     if response.status_code in [
@@ -193,6 +200,7 @@ class DataSourceBase:  # pylint: disable=too-many-instance-attributes
                             if "retry-after" in response.headers:
                                 try:
                                     retry_after = max(0, int(response.headers["retry-after"]))
+                                    retry_after = min(retry_after, self.MAX_RETRY_AFTER)
                                 except ValueError:
                                     pass
 
@@ -957,13 +965,21 @@ class CoinGecko(DataSourceBase):
             f"{self.api_root}/coins/{asset_id}"
             f"?localization=false&community_data=false&developer_data=false"
         )
-        return (
-            Decimal(repr(json_resp["market_data"]["current_price"][quote.lower()]))
-            if "market_data" in json_resp
-            and "current_price" in json_resp["market_data"]
-            and quote.lower() in json_resp["market_data"]["current_price"]
-            else None
-        )
+        if not isinstance(json_resp, dict):
+            return None
+        market = json_resp.get("market_data")
+        if not isinstance(market, dict):
+            return None
+        prices = market.get("current_price")
+        if not isinstance(prices, dict):
+            return None
+        price = prices.get(quote.lower())
+        if price is None:
+            return None
+        try:
+            return Decimal(repr(price))
+        except (ArithmeticError, ValueError, TypeError):
+            return None
 
     def get_historical(
         self,

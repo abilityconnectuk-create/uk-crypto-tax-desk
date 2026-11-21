@@ -8,7 +8,7 @@ import pytest
 import requests
 from requests.structures import CaseInsensitiveDict
 
-from bittytax.bt_types import AssetSymbol, QuoteSymbol, Timestamp
+from bittytax.bt_types import AssetId, AssetSymbol, QuoteSymbol, Timestamp
 from bittytax.config import config
 from bittytax.price.datasource import (
     BittyTaxAPI,
@@ -259,3 +259,36 @@ def test_anonymous_pacing_and_debug_output(
     api_source._get_json("https://api.bitty.tax/v1/symbols")
     assert waits == [pytest.approx(0.65)]
     assert "secret-key" not in capsys.readouterr().out
+
+
+def test_coingecko_null_current_price_returns_none() -> None:
+    source = CoinGecko.__new__(CoinGecko)
+    source.api_root = "https://api.coingecko.com/api/v3"
+
+    def missing_quote(_url: str) -> dict:
+        return {"market_data": {"current_price": {"gbp": None}}}
+
+    source._get_json = missing_quote  # type: ignore[assignment]
+    assert source.get_latest(AssetSymbol("ETH"), QuoteSymbol("GBP"), AssetId("ethereum")) is None
+
+    def missing_map(_url: str) -> dict:
+        return {"market_data": {"current_price": None}}
+
+    source._get_json = missing_map  # type: ignore[assignment]
+    assert source.get_latest(AssetSymbol("ETH"), QuoteSymbol("GBP"), AssetId("ethereum")) is None
+
+
+def test_price_requests_use_a_bounded_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    source = DataSourceBase()
+    session = Mock()
+    response = Mock(status_code=200, reason="OK")
+    response.json.return_value = {"ok": True}
+    session.get.return_value = response
+    monkeypatch.setattr(source, "_get_session", lambda: session)
+    monkeypatch.setattr(source, "_rate_limit", lambda: None)
+    assert source._get_json("https://example.test/price") == {"ok": True}
+    assert session.get.call_args.kwargs["timeout"] == (
+        DataSourceBase.CONNECT_TIMEOUT,
+        DataSourceBase.READ_TIMEOUT,
+    )
+    assert DataSourceBase.MAX_RETRY_AFTER == 15

@@ -32,6 +32,7 @@ class TrType(Enum):
     DIVIDEND = "Dividend"
     INCOME = "Income"
     GIFT_RECEIVED = "Gift-Received"
+    REVIEW_ACQUISITION = "Review-Acquisition"
     FORK = "Fork"
     AIRDROP = "Airdrop"
     REFERRAL = "Referral"
@@ -94,6 +95,7 @@ BUY_TYPES = (
     TrType.DIVIDEND,
     TrType.INCOME,
     TrType.GIFT_RECEIVED,
+    TrType.REVIEW_ACQUISITION,
     TrType.FORK,
     TrType.AIRDROP,
     TrType.REFERRAL,
