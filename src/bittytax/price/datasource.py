@@ -66,6 +66,9 @@ class DataSourceBase:  # pylint: disable=too-many-instance-attributes
     DEPRECATED = False
 
     TIME_OUT = 30
+    CONNECT_TIMEOUT = 10
+    READ_TIMEOUT = 20
+    MAX_RETRY_AFTER = 15
     RATE_LIMIT = 5.0  # requests per second
     RETRIES = 3
     BACKOFF_FACTOR = 1  # seconds
@@ -174,7 +177,11 @@ class DataSourceBase:  # pylint: disable=too-many-instance-attributes
                             )
                         )
 
-                    response = session.get(url, headers=self.headers, timeout=self.TIME_OUT)
+                    response = session.get(
+                        url,
+                        headers=self.headers,
+                        timeout=(self.CONNECT_TIMEOUT, self.READ_TIMEOUT),
+                    )
                     self._handle_response(response, url)
 
                     if response.status_code in [
@@ -193,6 +200,7 @@ class DataSourceBase:  # pylint: disable=too-many-instance-attributes
                             if "retry-after" in response.headers:
                                 try:
                                     retry_after = max(0, int(response.headers["retry-after"]))
+                                    retry_after = min(retry_after, self.MAX_RETRY_AFTER)
                                 except ValueError:
                                     pass
 

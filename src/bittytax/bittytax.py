@@ -115,11 +115,17 @@ def _create_arg_parser(version_str: str) -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--review-rows",
-        choices=["reject", "disposal", "transfer"],
+        choices=["reject", "market", "disposal", "transfer"],
         default=None,
-        help="how to treat _Needs-Review rows: reject (default), "
-        "disposal (Gift-Sent/Gift-Received), or transfer (Withdrawal/Deposit). "
-        "disposal and transfer print a warning and a count. Confirm every row.",
+        help="how to treat unmatched and unmapped rows. reject (default) skips them "
+        "with a warning. market (recommended) acquires deposits at market value and "
+        "treats withdrawals as transfers. disposal treats both as gifts. "
+        "transfer treats both as transfers. Confirm every row.",
+    )
+    parser.add_argument(
+        "--skip-holdings",
+        action="store_true",
+        help="do not value current holdings. The tax report is written without that lookup.",
     )
     return parser
 
@@ -191,24 +197,23 @@ def _run(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
                 tax.process_income()
                 tax.process_margin_trades()
 
-            _do_each_tax_year(tax, args.tax_year, args.summary_only, value_asset)
+            _do_each_tax_year(tax, args.tax_year, args.summary_only)
 
         except DataSourceApiError as e:
             parser.exit(message=f"{ERROR} {e} - please wait and try again\n")
         except DataSourceError as e:
             parser.exit(message=f"{ERROR} {e}\n")
 
-        if args.nopdf:
-            ReportLog(args, audit, tax.tax_report, value_asset.price_report, tax.holdings_report)
-        else:
-            ReportPdf(
-                parser.prog,
-                args,
-                audit,
-                tax.tax_report,
-                value_asset.price_report,
-                tax.holdings_report,
-            )
+        # The tax report is written before any live holdings valuation, so a
+        # stalled price lookup cannot block the gains figures.
+        _write_report(parser.prog, args, audit, tax, value_asset)
+        if not args.summary_only and not args.skip_holdings and not args.tax_year:
+            try:
+                tax.calculate_holdings(value_asset)
+            except (DataSourceApiError, DataSourceError) as exc:
+                print(f"{WARNING} Holdings valuation skipped: {exc}")
+            else:
+                _write_report(parser.prog, args, audit, tax, value_asset)
 
 
 def main() -> None:
@@ -231,20 +236,57 @@ def _validate_year(value: str) -> int:
     return year
 
 
+def _write_report(
+    prog: str,
+    args: argparse.Namespace,
+    audit: AuditRecords,
+    tax: TaxCalculator,
+    value_asset: ValueAsset,
+) -> None:
+    if args.nopdf:
+        ReportLog(
+            args,
+            audit,
+            tax.tax_report,
+            value_asset.price_report,
+            tax.holdings_report,
+            tax.missing_cost_basis,
+            tax.liquid_staking,
+        )
+    else:
+        ReportPdf(
+            prog,
+            args,
+            audit,
+            tax.tax_report,
+            value_asset.price_report,
+            tax.holdings_report,
+            tax.missing_cost_basis,
+            tax.liquid_staking,
+        )
+
+
 def _warn_review_rows() -> None:
     count = TransactionRow.review_assumed_count
-    if not count:
-        return
-    treatment = str(config.review_rows)
-    print(
-        f"{WARNING} {count} needs-review transaction(s) were treated as {treatment}. "
-        "Confirm each one before relying on this report. "
-        "Transfers can hide real disposals. Disposals can overstate gains."
-    )
+    skipped = TransactionRow.skipped_unmapped_count
+    if count:
+        treatment = str(config.review_rows)
+        print(
+            f"{WARNING} {count} unmatched or unmapped transaction(s) were treated as "
+            f"{treatment}. Confirm each one before relying on this report. "
+            "The recommended treatment is market: deposits acquired at market value, "
+            "withdrawals left as transfers."
+        )
+    if skipped:
+        print(
+            f"{WARNING} {skipped} unmapped transaction(s) were skipped. "
+            "They are not in this calculation. Re-run with --review-rows market to include them."
+        )
 
 
 def _do_import(filename: str) -> List[TransactionRecord]:
     TransactionRow.review_assumed_count = 0
+    TransactionRow.skipped_unmapped_count = 0
     import_records = ImportRecords()
 
     if filename:
@@ -325,9 +367,7 @@ def _transfer_mismatches(holdings: Dict[AssetSymbol, Holdings]) -> bool:
     return bool([asset for asset in holdings if holdings[asset].mismatches])
 
 
-def _do_each_tax_year(
-    tax: TaxCalculator, tax_year: Year, summary_only: bool, value_asset: ValueAsset
-) -> None:
+def _do_each_tax_year(tax: TaxCalculator, tax_year: Year, summary_only: bool) -> None:
     if tax_year:
         print(f"{Fore.CYAN}calculating tax year {config.format_tax_year(tax_year)}")
 
@@ -361,9 +401,6 @@ def _do_each_tax_year(
                     }
             else:
                 print(f"{WARNING} Tax year {year} is not supported")
-
-        if not summary_only:
-            tax.calculate_holdings(value_asset)
 
 
 def _do_export(transaction_records: List[TransactionRecord]) -> None:

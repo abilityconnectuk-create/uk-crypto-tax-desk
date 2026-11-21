@@ -14,6 +14,13 @@ class TransactionParserError(Exception):
         self.value = value
 
 
+class SkippedTransaction(TransactionParserError):
+    """An unmapped type was skipped so the rest of the file can still be calculated."""
+
+    def __str__(self) -> str:
+        return f"Skipped unmapped type '{self.value}'. It was not imported."
+
+
 class UnexpectedTransactionTypeError(TransactionParserError):
     def __str__(self) -> str:
         return (

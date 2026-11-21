@@ -28,6 +28,8 @@ from .tax import (
     CalculateMarginTrading,
     CapitalGainsReportEstimate,
     HoldingsReportRecord,
+    LiquidStakeNote,
+    MissingCostBasis,
     TaxReportRecord,
 )
 from .version import __version__
@@ -51,7 +53,11 @@ class ReportPdf:
         tax_report: Optional[Dict[Year, TaxReportRecord]] = None,
         price_report: Optional[Dict[Year, Dict[AssetSymbol, Dict[Date, PriceDataRecord]]]] = None,
         holdings_report: Optional[HoldingsReportRecord] = None,
+        missing_cost_basis: Optional[List[MissingCostBasis]] = None,
+        liquid_staking: Optional[List[LiquidStakeNote]] = None,
     ) -> None:
+        self.missing_cost_basis = missing_cost_basis or []
+        self.liquid_staking = liquid_staking or []
         self.env = jinja2.Environment(loader=jinja2.PackageLoader(__package__, "templates"))
 
         self.env.filters["datefilter"] = self.datefilter
@@ -90,6 +96,8 @@ class ReportPdf:
                     "tax_report": tax_report,
                     "review_count": TransactionRow.review_assumed_count,
                     "review_treatment": config.review_rows,
+                    "missing_cost_basis": self.missing_cost_basis,
+                    "liquid_staking": self.liquid_staking,
                 }
             )
         else:
@@ -107,6 +115,8 @@ class ReportPdf:
                     "holdings_report": holdings_report,
                     "review_count": TransactionRow.review_assumed_count,
                     "review_treatment": config.review_rows,
+                    "missing_cost_basis": self.missing_cost_basis,
+                    "liquid_staking": self.liquid_staking,
                 }
             )
 
@@ -221,7 +231,11 @@ class ReportLog:
         tax_report: Optional[Dict[Year, TaxReportRecord]] = None,
         price_report: Optional[Dict[Year, Dict[AssetSymbol, Dict[Date, PriceDataRecord]]]] = None,
         holdings_report: Optional[HoldingsReportRecord] = None,
+        missing_cost_basis: Optional[List[MissingCostBasis]] = None,
+        liquid_staking: Optional[List[LiquidStakeNote]] = None,
     ) -> None:
+        self.missing_cost_basis = missing_cost_basis or []
+        self.liquid_staking = liquid_staking or []
         if args.audit_only:
             self._audit(audit)
         elif args.summary_only:
@@ -237,7 +251,36 @@ class ReportLog:
                 raise RuntimeError("Missing price_report")
 
             self._print_review_warning()
+            self._print_extra_sections()
             self._tax_full(args.tax_rules, audit, tax_report, price_report, holdings_report)
+
+    def _print_extra_sections(self) -> None:
+        if self.missing_cost_basis:
+            print(
+                f"\n{Fore.RED}{Style.BRIGHT}Missing cost basis "
+                f"({len(self.missing_cost_basis)}){Style.NORMAL}"
+            )
+            print(
+                f"{Fore.YELLOW}Quantity with no pooled cost is a gain at zero cost. "
+                "The pool cost is never taken below zero."
+            )
+            for item in self.missing_cost_basis:
+                print(
+                    f"{Fore.WHITE}{item.date} {item.asset} "
+                    f"short {item.quantity_short.normalize():0,f} "
+                    f"proceeds {config.sym()}{item.proceeds:0,.2f} {config.ccy}"
+                )
+        if self.liquid_staking:
+            print(f"\n{Fore.CYAN}Liquid staking pooled ({len(self.liquid_staking)})")
+            print(
+                f"{Fore.YELLOW}These are not one-to-one wraps. Cost was carried into the "
+                "pooled symbol. An accountant must confirm this is not a disposal."
+            )
+            for stake in self.liquid_staking:
+                print(
+                    f"{Fore.WHITE}{stake.date} {stake.asset} "
+                    f"{stake.quantity.normalize():0,f} {stake.detail}"
+                )
 
     def _print_review_warning(self) -> None:
         count = TransactionRow.review_assumed_count
@@ -252,6 +295,7 @@ class ReportLog:
 
     def _tax_summary(self, tax_rules: TaxRules, tax_report: Dict[Year, TaxReportRecord]) -> None:
         self._print_review_warning()
+        self._print_extra_sections()
         print(f"{Fore.WHITE}tax report output:")
         for tax_year in sorted(tax_report):
             print(

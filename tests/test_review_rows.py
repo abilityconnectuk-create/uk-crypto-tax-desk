@@ -1,8 +1,10 @@
+from decimal import Decimal
+
 import pytest
 
 from bittytax.bt_types import TrType
 from bittytax.config import config
-from bittytax.exceptions import UnexpectedTransactionTypeError
+from bittytax.exceptions import SkippedTransaction
 from bittytax.t_row import TransactionRow
 
 
@@ -16,17 +18,22 @@ def _parse(t_type: str, **cells: str) -> TransactionRow:
     return row
 
 
-def test_needs_review_is_rejected_by_default() -> None:
+def test_needs_review_is_skipped_rather_than_aborting() -> None:
     previous = config.review_rows
     config.config["review_rows"] = "reject"
     TransactionRow.review_assumed_count = 0
+    TransactionRow.skipped_unmapped_count = 0
     try:
-        with pytest.raises(UnexpectedTransactionTypeError):
+        with pytest.raises(SkippedTransaction):
             _parse("_Needs-Review", **{"Sell Quantity": "1", "Sell Asset": "ETH"})
+        with pytest.raises(SkippedTransaction):
+            _parse("_Liquidity in", **{"Buy Quantity": "1", "Buy Asset": "LP-ETH"})
         assert TransactionRow.review_assumed_count == 0
+        assert TransactionRow.skipped_unmapped_count == 2
     finally:
         config.config["review_rows"] = previous
         TransactionRow.review_assumed_count = 0
+        TransactionRow.skipped_unmapped_count = 0
 
 
 def test_review_rows_disposal_and_transfer() -> None:
@@ -44,6 +51,18 @@ def test_review_rows_disposal_and_transfer() -> None:
         moved = _parse("_Needs-Review", **{"Sell Quantity": "1", "Sell Asset": "ETH"})
         assert moved.t_record is not None and moved.t_record.t_type is TrType.WITHDRAWAL
         assert TransactionRow.review_assumed_count == 3
+
+        config.config["review_rows"] = "market"
+        acquired = _parse(
+            "_Needs-Review",
+            **{"Buy Quantity": "2", "Buy Asset": "SOL", "Buy Value": "40"},
+        )
+        moved = _parse("_Needs-Review", **{"Sell Quantity": "1", "Sell Asset": "ETH"})
+        assert acquired.t_record is not None
+        assert acquired.t_record.t_type is TrType.REVIEW_ACQUISITION
+        assert acquired.t_record.buy is not None
+        assert acquired.t_record.buy.cost == Decimal("40")
+        assert moved.t_record is not None and moved.t_record.t_type is TrType.WITHDRAWAL
     finally:
         config.config["review_rows"] = previous
         TransactionRow.review_assumed_count = 0

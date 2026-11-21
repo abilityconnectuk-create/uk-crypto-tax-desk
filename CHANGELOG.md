@@ -11,6 +11,9 @@ The new `price_via_btc` config option may not exist in your config file. If it i
 ### Fixed
 - Koinly parser: amounts with thousands separators (for example 1,234.56) are parsed, and a local-currency amount keeps its quantity as the value after FX conversion.
 - Price tool: CoinGecko latest price returns no price when `current_price` is null, instead of failing the report.
+- Accounting tool: a disposal larger than the Section 104 pool no longer drives pool cost negative. The shortfall is listed as missing cost basis at zero cost.
+- Accounting tool: an unmapped transaction type is skipped with a warning instead of aborting the import.
+- Price tool: live price requests use a connect and read timeout, and retry waits are capped. The tax report is written before holdings are valued. `--skip-holdings` skips that valuation.
 - Coinbase parser: fixed negative values for Advanced Trade Sells.
 - MEXC parser: fees for spot trades should always be the quote asset.
 - Coinbase parser: fixed regex to ignore extra descriptions at end of trades.

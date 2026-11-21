@@ -81,7 +81,19 @@ class TransactionHistory:
                             if config.transfer_fee_allowable_cost:
                                 tr.fee.fee_value = tr.fee.proceeds
 
-                if tr.t_type is not TrType.LOST:
+                if tr.note and "liquid staking rebase" in tr.note and tr.sell and tr.buy:
+                    # Sell first so the pool quantity changes before the new units are added.
+                    # Neither leg is a taxable disposal or acquisition: the cost stays put.
+                    tr.sell.disposal = False
+                    tr.buy.acquisition = False
+                    tr.sell.set_tid()
+                    self.transactions.append(tr.sell)
+                    tr.buy.set_tid()
+                    self.transactions.append(tr.buy)
+                    if tr.fee and tr.fee.quantity:
+                        tr.fee.set_tid()
+                        self.transactions.append(tr.fee)
+                elif tr.t_type is not TrType.LOST:
                     if tr.buy and (tr.buy.quantity or tr.buy.fee_value):
                         tr.buy.set_tid()
                         self.transactions.append(tr.buy)
@@ -352,6 +364,7 @@ class Buy(TransactionBase):  # pylint: disable=too-many-instance-attributes
         TrType.DIVIDEND,
         TrType.INCOME,
         TrType.GIFT_RECEIVED,
+        TrType.REVIEW_ACQUISITION,
         TrType.FORK,
         TrType.AIRDROP,
         TrType.REFERRAL,

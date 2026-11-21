@@ -16,6 +16,7 @@ from .wallets import MatchSettings, RegistryEntry, TokenGroup, WalletRegistry, f
 # Accounting tool rejects this type, so an unmatched withdrawal cannot be taxed as a gift
 # until the user edits the row.
 NEEDS_REVIEW_TYPE = "_Needs-Review"
+POSSIBLE_SPAM_TYPE = "_Possible-Spam"
 
 _OUT_TYPES = frozenset({TrType.WITHDRAWAL, TrType.GIFT_SENT, TrType.SPEND, TrType.CHARITY_SENT})
 _IN_TYPES = frozenset({TrType.DEPOSIT, TrType.GIFT_RECEIVED})
@@ -74,6 +75,7 @@ class ReviewRow:
 class ReconcileResult:
     summary: List[SummaryRow] = field(default_factory=list)
     review: List[ReviewRow] = field(default_factory=list)
+    spam: List[ReviewRow] = field(default_factory=list)
 
 
 @dataclass
@@ -112,7 +114,7 @@ def reconcile_transfers(
     result = ReconcileResult()
     legs = [leg for leg in (_leg_for(row, registry) for row in rows) if leg is not None]
     _pair(legs, registry.match, result)
-    _finish_unmatched(legs, legacy_gifts, review_as, result)
+    _finish_unmatched(legs, legacy_gifts, review_as, result, registry)
     if registry.match.share_pools:
         _share_pools(rows, containers, registry.match, result)
     return result
@@ -125,21 +127,27 @@ def count_actions(result: ReconcileResult) -> Dict[str, int]:
     return counts
 
 
-def reconciliation_report_paths(output_filename: Optional[str]) -> Tuple[str, str]:
+def reconciliation_report_paths(output_filename: Optional[str]) -> Tuple[str, str, str]:
     if output_filename:
         stem, _ext = os.path.splitext(output_filename)
         if not stem:
             stem = "BittyTax_Records"
     else:
         stem = "BittyTax_Records"
-    return f"{stem}-transfer-summary.csv", f"{stem}-needs-review.csv"
+    return (
+        f"{stem}-transfer-summary.csv",
+        f"{stem}-needs-review.csv",
+        f"{stem}-possible-spam.csv",
+    )
 
 
 def write_reconciliation_reports(
-    result: ReconcileResult, summary_path: str, review_path: str
+    result: ReconcileResult, summary_path: str, review_path: str, spam_path: str = ""
 ) -> None:
     _write_csv(summary_path, _SUMMARY_HEADER, [_summary_cells(row) for row in result.summary])
     _write_csv(review_path, _REVIEW_HEADER, [_review_cells(row) for row in result.review])
+    if spam_path:
+        _write_csv(spam_path, _REVIEW_HEADER, [_review_cells(row) for row in result.spam])
 
 
 def format_reconciliation_message(result: ReconcileResult) -> str:
@@ -152,6 +160,8 @@ def format_reconciliation_message(result: ReconcileResult) -> str:
         f"{counts.get('legacy-gift', 0)} kept as gifts",
         f"{counts.get('assumed-disposal', 0)} assumed disposals",
         f"{counts.get('assumed-transfer', 0)} assumed transfers",
+        f"{counts.get('assumed-market', 0)} market acquisitions",
+        f"{counts.get('possible-spam', 0)} possible spam",
     ]
     lines = ["transfer reconciliation: " + ", ".join(parts)]
     if counts.get("needs-review", 0):
@@ -288,7 +298,11 @@ def _apply_match(
 
 
 def _finish_unmatched(
-    legs: Sequence[_Leg], legacy_gifts: bool, review_as: str, result: ReconcileResult
+    legs: Sequence[_Leg],
+    legacy_gifts: bool,
+    review_as: str,
+    result: ReconcileResult,
+    registry: WalletRegistry,
 ) -> None:
     for leg in legs:
         if leg.consumed:
@@ -300,7 +314,7 @@ def _finish_unmatched(
         elif leg.direction == "out" and leg.payee_entry is not None:
             _record_payee(leg, view, result)
         elif leg.ambiguous and record.t_type in (TrType.GIFT_SENT, TrType.GIFT_RECEIVED):
-            _record_unmatched(leg, view, legacy_gifts, review_as, result)
+            _record_unmatched(leg, view, legacy_gifts, review_as, result, registry)
 
 
 def _record_own_address(leg: _Leg, view: _View, result: ReconcileResult) -> None:
@@ -327,7 +341,12 @@ def _record_payee(leg: _Leg, view: _View, result: ReconcileResult) -> None:
 
 
 def _record_unmatched(
-    leg: _Leg, view: _View, legacy_gifts: bool, review_as: str, result: ReconcileResult
+    leg: _Leg,
+    view: _View,
+    legacy_gifts: bool,
+    review_as: str,
+    result: ReconcileResult,
+    registry: WalletRegistry,
 ) -> None:
     kind = "withdrawal" if leg.direction == "out" else "deposit"
     # Read the original description before the note is rewritten.
@@ -344,7 +363,16 @@ def _record_unmatched(
         result.review.append(_review(leg, view, "kept-as-gift", description))
         return
 
-    treatment = review_as if review_as in ("disposal", "transfer") else "reject"
+    if _is_spam(view.asset, registry):
+        _record(leg.row).t_type = UnmappedType(POSSIBLE_SPAM_TYPE)
+        _append_note(_record(leg.row), "possible spam")
+        result.summary.append(
+            _summary("possible-spam", view, f"untagged {kind} listed as possible spam")
+        )
+        result.spam.append(_review(leg, view, "possible-spam", description))
+        return
+
+    treatment = review_as if review_as in ("disposal", "transfer", "market") else "reject"
     if treatment == "reject":
         _record(leg.row).t_type = UnmappedType(NEEDS_REVIEW_TYPE)
         _append_note(_record(leg.row), f"needs review: unmatched {kind}")
@@ -355,7 +383,11 @@ def _record_unmatched(
         return
 
     _apply_review_type(leg, treatment)
-    action = "assumed-disposal" if treatment == "disposal" else "assumed-transfer"
+    action = {
+        "disposal": "assumed-disposal",
+        "transfer": "assumed-transfer",
+        "market": "assumed-market",
+    }[treatment]
     result.summary.append(
         _summary(
             action, view, f"untagged {kind} treated as {treatment} so a report can be produced"
@@ -367,13 +399,19 @@ def _record_unmatched(
 def _apply_review_type(leg: _Leg, treatment: str) -> None:
     record = _record(leg.row)
     if leg.direction == "out":
-        record.t_type = TrType.GIFT_SENT if treatment == "disposal" else TrType.WITHDRAWAL
-        if treatment == "transfer":
+        if treatment == "disposal":
+            record.t_type = TrType.GIFT_SENT
+        else:
+            # transfer and market both leave the send as a non-disposal
+            record.t_type = TrType.WITHDRAWAL
             record.sell_value = None
+    elif treatment == "market":
+        record.t_type = TrType.REVIEW_ACQUISITION
+    elif treatment == "disposal":
+        record.t_type = TrType.GIFT_RECEIVED
     else:
-        record.t_type = TrType.GIFT_RECEIVED if treatment == "disposal" else TrType.DEPOSIT
-        if treatment == "transfer":
-            record.buy_value = None
+        record.t_type = TrType.DEPOSIT
+        record.buy_value = None
     _append_note(record, f"{_REVIEW_NOTE} {treatment}")
 
 
@@ -571,6 +609,29 @@ def _assets_compatible(left: str, right: str, groups: Sequence[TokenGroup]) -> b
     return any(first in group.symbols and second in group.symbols for group in groups)
 
 
+def _is_spam(asset: str, registry: WalletRegistry) -> bool:
+    symbol = asset.strip().upper()
+    if symbol in {item.upper() for item in registry.spam_symbols}:
+        return True
+    folded = asset.casefold()
+    return any(pattern and pattern in folded for pattern in registry.spam_patterns)
+
+
+def _matches_explicit_payee(entry: RegistryEntry, row: DataRow) -> bool:
+    if entry.tx_hash and _tx_hash(row).casefold() == entry.tx_hash.casefold():
+        return True
+    if not (entry.on_date and entry.asset and entry.amount):
+        return False
+    record = _record(row)
+    if _as_utc(record.timestamp).date().isoformat() != entry.on_date:
+        return False
+    if record.sell_asset.strip().upper() != entry.asset.strip().upper():
+        return False
+    if record.sell_quantity is None:
+        return False
+    return record.sell_quantity == Decimal(entry.amount)
+
+
 def _group_for(asset: str, groups: Sequence[TokenGroup]) -> Optional[TokenGroup]:
     symbol = asset.strip().upper()
     for group in groups:
@@ -595,6 +656,9 @@ def _find_payee(
     by_destination = find_entry(entries, *candidates, chain=chain)
     if by_destination is not None:
         return by_destination
+    for entry in entries:
+        if _matches_explicit_payee(entry, row):
+            return entry
     record = _record(row)
     text = f"{record.note} {_description(row)}".casefold()
     wallet = record.wallet.strip().casefold()
@@ -622,6 +686,15 @@ def _share_pools(
     if not homes and isinstance(rows, list):
         homes = [rows]
     for row in list(rows):
+        if _mark_liquid_trade(row, settings):
+            result.summary.append(
+                _summary(
+                    "liquid-stake",
+                    _view_record(row, "out"),
+                    str(_record(row).note),
+                )
+            )
+            continue
         deposit = _convert_wrap(row, settings)
         if deposit is None:
             continue
@@ -640,18 +713,27 @@ def _share_pools(
 
 
 def _convert_wrap(row: DataRow, settings: MatchSettings) -> Optional[DataRow]:
-    if row.t_record is None or row.t_record.t_type is not TrType.TRADE:
-        return None
     record = row.t_record
-    if not record.sell_asset or not record.buy_asset:
-        return None
-    if _group_for(record.sell_asset, settings.token_groups) is None:
-        return None
-    if not _assets_compatible(record.sell_asset, record.buy_asset, settings.token_groups):
+    group = (
+        _group_for(record.sell_asset, settings.token_groups)
+        if record is not None and record.sell_asset
+        else None
+    )
+    quantities_ok = (
+        record is not None
+        and record.t_type is TrType.TRADE
+        and record.sell_quantity is not None
+        and record.buy_quantity is not None
+        and bool(record.sell_asset)
+        and bool(record.buy_asset)
+        and group is not None
+        and not group.liquid
+        and _assets_compatible(record.sell_asset, record.buy_asset, settings.token_groups)
+        and _amounts_close(record.sell_quantity, record.buy_quantity, settings)
+    )
+    if record is None or not quantities_ok:
         return None
     if record.sell_quantity is None or record.buy_quantity is None:
-        return None
-    if not _amounts_close(record.sell_quantity, record.buy_quantity, settings):
         return None
 
     canonical = _canonical(record.sell_asset, settings)
@@ -684,6 +766,24 @@ def _convert_wrap(row: DataRow, settings: MatchSettings) -> Optional[DataRow]:
         note=f"wrap treated as a transfer in the {canonical} pool",
     )
     return deposit
+
+
+def _mark_liquid_trade(row: DataRow, settings: MatchSettings) -> bool:
+    if row.t_record is None or row.t_record.t_type is not TrType.TRADE:
+        return False
+    record = row.t_record
+    if not record.sell_asset or not record.buy_asset:
+        return False
+    group = _group_for(record.sell_asset, settings.token_groups)
+    if group is None or not group.liquid:
+        return False
+    if not _assets_compatible(record.sell_asset, record.buy_asset, settings.token_groups):
+        return False
+    _append_note(
+        record,
+        f"liquid staking rebase {record.sell_asset}/{record.buy_asset} into {group.canonical()}",
+    )
+    return True
 
 
 def _rename_record(row: DataRow, settings: MatchSettings) -> None:

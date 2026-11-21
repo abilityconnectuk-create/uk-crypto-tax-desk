@@ -4,6 +4,7 @@
 
 import copy
 import datetime
+from dataclasses import dataclass
 from decimal import Decimal, getcontext
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -35,6 +36,27 @@ from .transactions import Buy, Sell
 from .utils import bt_tqdm_write, disable_tqdm
 
 PRECISION = Decimal("0.00")
+
+
+@dataclass
+class MissingCostBasis:
+    """Quantity disposed with no pooled cost. Proceeds of that quantity are a gain."""
+
+    date: Date
+    asset: AssetSymbol
+    quantity_short: Decimal
+    proceeds: Decimal
+
+
+@dataclass
+class LiquidStakeNote:
+    """A non-1:1 liquid-staking trade pooled into the canonical asset."""
+
+    date: Date
+    asset: AssetSymbol
+    quantity: Decimal
+    detail: str
+
 
 getcontext().prec = 30
 
@@ -163,6 +185,8 @@ class TaxCalculator:  # pylint: disable=too-many-instance-attributes
 
         self.tax_events: Dict[Year, List[TaxEvent]] = {}
         self.holdings: Dict[AssetSymbol, Holdings] = {}
+        self.missing_cost_basis: List[MissingCostBasis] = []
+        self.liquid_staking: List[LiquidStakeNote] = []
 
         self.tax_report: Dict[Year, TaxReportRecord] = {}
         self.holdings_report: Optional[HoldingsReportRecord] = None
@@ -449,19 +473,18 @@ class TaxCalculator:  # pylint: disable=too-many-instance-attributes
         self.holdings[t.asset].add_tokens(t.quantity, cost, fees, t.t_type is TrType.DEPOSIT)
 
     def _subtract_tokens(self, t: Sell, skip_integrity_check: bool) -> None:
+        if self._is_liquid_rebase(t):
+            self.liquid_staking.append(LiquidStakeNote(t.date(), t.asset, t.quantity, str(t.note)))
         if not t.disposal:
             cost = fees = Decimal(0)
+            removed = t.quantity
         else:
-            if self.holdings[t.asset].quantity:
-                cost = self.holdings[t.asset].cost * (t.quantity / self.holdings[t.asset].quantity)
-                fees = self.holdings[t.asset].fees * (t.quantity / self.holdings[t.asset].quantity)
-            else:
-                # Should never happen, only if incorrect transaction records
-                cost = fees = Decimal(0)
+            removed, cost, fees, shortfall = self._capped_pool_cost(t)
+            if shortfall > 0:
+                self._record_missing_cost(t, shortfall)
 
-        self.holdings[t.asset].subtract_tokens(
-            t.quantity, cost, fees, t.t_type is TrType.WITHDRAWAL
-        )
+        self.holdings[t.asset].subtract_tokens(removed, cost, fees, t.t_type is TrType.WITHDRAWAL)
+        self._clamp_pool(t.asset)
 
         if t.disposal:
             if t.t_type in self.NO_GAIN_NO_LOSS_TYPES:
@@ -490,6 +513,48 @@ class TaxCalculator:  # pylint: disable=too-many-instance-attributes
 
             if config.transfers_include and not skip_integrity_check:
                 self.holdings[t.asset].check_transfer_mismatch()
+
+    def _capped_pool_cost(self, t: Sell) -> Tuple[Decimal, Decimal, Decimal, Decimal]:
+        """Match only the quantity the pool holds. Cost cannot exceed, or go below, the pool."""
+        holding = self.holdings[t.asset]
+        available = holding.quantity if holding.quantity > 0 else Decimal(0)
+        matched = min(t.quantity, available)
+        shortfall = t.quantity - matched
+        if matched <= 0 or holding.quantity <= 0:
+            return matched, Decimal(0), Decimal(0), shortfall
+
+        ratio = matched / holding.quantity
+        cost = holding.cost * ratio
+        fees = holding.fees * ratio
+        if cost > holding.cost or cost < 0:
+            cost = holding.cost if holding.cost > 0 else Decimal(0)
+        if fees > holding.fees or fees < 0:
+            fees = holding.fees if holding.fees > 0 else Decimal(0)
+        return matched, cost, fees, shortfall
+
+    def _record_missing_cost(self, t: Sell, shortfall: Decimal) -> None:
+        proceeds = t.proceeds if t.proceeds is not None else Decimal(0)
+        short_proceeds = proceeds * shortfall / t.quantity if t.quantity else Decimal(0)
+        self.missing_cost_basis.append(
+            MissingCostBasis(t.date(), t.asset, shortfall, short_proceeds)
+        )
+        bt_tqdm_write(
+            f"{WARNING} Missing cost basis: {shortfall.normalize():0,f} {t.asset} "
+            f"on {t.date()} is not in the pool. "
+            f"Proceeds of {config.sym()}{short_proceeds:0,.2f} {config.ccy} "
+            "are a gain at zero cost."
+        )
+
+    @staticmethod
+    def _is_liquid_rebase(t: Sell) -> bool:
+        return bool(t.note and "liquid staking rebase" in str(t.note))
+
+    def _clamp_pool(self, asset: AssetSymbol) -> None:
+        holding = self.holdings[asset]
+        if holding.cost < 0:
+            holding.cost = Decimal(0)
+        if holding.fees < 0:
+            holding.fees = Decimal(0)
 
     def process_income(self) -> None:
         if config.debug:

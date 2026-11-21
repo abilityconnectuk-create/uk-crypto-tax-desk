@@ -88,11 +88,13 @@ price_via_btc: False
 # Coinbase trades which have zero fees should be identified as gifts
 coinbase_zero_fees_are_gifts: False
 
-# How the accounting tool treats rows still marked _Needs-Review.
-# reject (default) stops the import.
-# disposal treats a send as Gift-Sent and a receipt as Gift-Received. Gains may be overstated.
-# transfer treats a send as Withdrawal and a receipt as Deposit. Real disposals may be missed.
-# Either override prints a warning and a count in the report. Confirm every row.
+# How unmatched and unmapped rows are treated.
+# reject (default) skips them with a warning and does not abort the file.
+# market (recommended) acquires deposits at market value (Review-Acquisition)
+# and treats withdrawals as transfers.
+# disposal treats both as gifts. This can invent large losses.
+# transfer treats both as transfers. Real disposals can disappear and the pool can invert.
+# Overrides print a warning and a count. Confirm every row.
 review_rows: reject
 
 # Binance BNB converts, split the BNB amount evenly across multiple tokens converted at the same time

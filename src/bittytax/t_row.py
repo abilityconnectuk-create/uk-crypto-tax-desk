@@ -15,10 +15,10 @@ from .constants import TZ_UTC
 from .exceptions import (
     DataValueError,
     MissingDataError,
+    SkippedTransaction,
     TimestampParserError,
     TransactionParserError,
     UnexpectedDataError,
-    UnexpectedTransactionTypeError,
 )
 from .t_record import TransactionRecord
 from .tax import TaxCalculator
@@ -55,6 +55,7 @@ class TransactionRow:
     NEEDS_REVIEW_TYPE = "_Needs-Review"
     REVIEW_NOTE = "review row treated as"
     review_assumed_count = 0
+    skipped_unmapped_count = 0
 
     HEADER = [
         "Type",
@@ -170,6 +171,18 @@ class TransactionRow:
             fee_value=FieldRequired.OPTIONAL,
         ),
         TrType.GIFT_RECEIVED: FieldValidation(
+            t_type=FieldRequired.MANDATORY,
+            buy_quantity=FieldRequired.MANDATORY,
+            buy_asset=FieldRequired.MANDATORY,
+            buy_value=FieldRequired.OPTIONAL,
+            sell_quantity=FieldRequired.NOT_REQUIRED,
+            sell_asset=FieldRequired.NOT_REQUIRED,
+            sell_value=FieldRequired.NOT_REQUIRED,
+            fee_quantity=FieldRequired.OPTIONAL,
+            fee_asset=FieldRequired.OPTIONAL,
+            fee_value=FieldRequired.OPTIONAL,
+        ),
+        TrType.REVIEW_ACQUISITION: FieldValidation(
             t_type=FieldRequired.MANDATORY,
             buy_quantity=FieldRequired.MANDATORY,
             buy_asset=FieldRequired.MANDATORY,
@@ -549,31 +562,38 @@ class TransactionRow:
         try:
             return TrType(raw)
         except ValueError as exc:
-            if raw != self.NEEDS_REVIEW_TYPE:
-                raise UnexpectedTransactionTypeError(
-                    self.HEADER.index("Type"), "Type", raw
-                ) from exc
-            return self._review_override(exc)
+            return self._review_override(exc, raw)
 
-    def _review_override(self, exc: ValueError) -> TrType:
+    def _review_override(self, exc: ValueError, raw: str) -> TrType:
+        if raw == "_Possible-Spam":
+            TransactionRow.skipped_unmapped_count += 1
+            raise SkippedTransaction(self.HEADER.index("Type"), "Type", raw) from exc
         treatment = str(config.review_rows)
-        if treatment not in ("disposal", "transfer"):
-            raise UnexpectedTransactionTypeError(
-                self.HEADER.index("Type"),
-                "Type",
-                f"{self.NEEDS_REVIEW_TYPE} (set review_rows to disposal or transfer to continue)",
-            ) from exc
-
         has_buy = bool(self.row_dict["Buy Quantity"] or self.row_dict["Buy Asset"])
         has_sell = bool(self.row_dict["Sell Quantity"] or self.row_dict["Sell Asset"])
+        if has_buy and has_sell:
+            TransactionRow.review_assumed_count += 1
+            return TrType.TRADE
+        if treatment not in ("disposal", "transfer", "market"):
+            TransactionRow.skipped_unmapped_count += 1
+            raise SkippedTransaction(
+                self.HEADER.index("Type"),
+                "Type",
+                f"{raw} (set review_rows to market, disposal, or transfer to include it)",
+            ) from exc
+
         TransactionRow.review_assumed_count += 1
         if has_sell and not has_buy:
-            return TrType.GIFT_SENT if treatment == "disposal" else TrType.WITHDRAWAL
+            if treatment == "disposal":
+                return TrType.GIFT_SENT
+            return TrType.WITHDRAWAL
         if has_buy and not has_sell:
-            return TrType.GIFT_RECEIVED if treatment == "disposal" else TrType.DEPOSIT
-        raise UnexpectedTransactionTypeError(
-            self.HEADER.index("Type"), "Type", self.NEEDS_REVIEW_TYPE
-        ) from exc
+            if treatment == "market":
+                return TrType.REVIEW_ACQUISITION
+            if treatment == "disposal":
+                return TrType.GIFT_RECEIVED
+            return TrType.DEPOSIT
+        raise SkippedTransaction(self.HEADER.index("Type"), "Type", raw) from exc
 
     def parse_timestamp(self) -> Timestamp:
         try:

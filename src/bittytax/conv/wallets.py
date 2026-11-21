@@ -21,13 +21,21 @@ class RegistryEntry:
     description: str = ""
     wallet: str = ""
     asset: str = ""
+    tx_hash: str = ""
+    on_date: str = ""
+    amount: str = ""
 
 
 @dataclass
 class TokenGroup:
-    """Symbols that may be one holding. The first symbol is the shared-pool name."""
+    """Symbols that may be one holding. The first symbol is the shared-pool name.
+
+    liquid=True is for non-1:1 tokens such as stETH. Cost is carried and the
+    quantity changes, but that is not a one-to-one wrap. An accountant must confirm it.
+    """
 
     symbols: Tuple[str, ...]
+    liquid: bool = False
 
     def canonical(self) -> str:
         return self.symbols[0]
@@ -47,10 +55,23 @@ class WalletRegistry:
     own: List[RegistryEntry] = field(default_factory=list)
     payees: List[RegistryEntry] = field(default_factory=list)
     match: MatchSettings = field(default_factory=MatchSettings)
+    spam_symbols: List[str] = field(default_factory=list)
+    spam_patterns: List[str] = field(default_factory=list)
 
 
-_TOP_LEVEL = {"own", "payees", "match", "token_groups"}
-_ENTRY_KEYS = {"label", "address", "account", "chain", "description", "wallet", "asset"}
+_TOP_LEVEL = {"own", "payees", "match", "token_groups", "spam"}
+_ENTRY_KEYS = {
+    "label",
+    "address",
+    "account",
+    "chain",
+    "description",
+    "wallet",
+    "asset",
+    "tx_hash",
+    "date",
+    "amount",
+}
 _MATCH_KEYS = {"window_hours", "amount_tolerance", "amount_tolerance_abs", "share_pools"}
 
 
@@ -73,10 +94,13 @@ def load_wallet_registry(path: str) -> WalletRegistry:
         names = ", ".join(sorted(str(name) for name in unknown))
         raise WalletRegistryError(f"Wallet registry has unknown keys: {names}")
 
+    spam_symbols, spam_patterns = _load_spam(loaded.get("spam"))
     registry = WalletRegistry(
         own=_load_entries(loaded.get("own"), "own"),
         payees=_load_entries(loaded.get("payees"), "payees"),
         match=_load_match(loaded.get("match")),
+        spam_symbols=spam_symbols,
+        spam_patterns=spam_patterns,
     )
     if "token_groups" in loaded:
         registry.match.token_groups = _load_token_groups(loaded.get("token_groups"))
@@ -146,14 +170,33 @@ def _load_entry(value: object, where: str) -> RegistryEntry:
     description = _optional_str(item, "description", where)
     wallet = _optional_str(item, "wallet", where)
     asset = _optional_str(item, "asset", where).upper()
-    if wallet and not asset and not (address or account or description):
+    tx_hash = _optional_str(item, "tx_hash", where)
+    on_date = _optional_str(item, "date", where)
+    amount = _optional_str(item, "amount", where)
+    identified = bool(
+        address
+        or account
+        or description
+        or tx_hash
+        or (wallet and asset)
+        or (on_date and asset and amount)
+    )
+    if wallet and not asset and not identified:
         raise WalletRegistryError(f"{where} wallet rule needs an asset")
-    if not (address or account or description or (wallet and asset)):
+    if not identified:
         raise WalletRegistryError(
-            f"{where} needs an address, an account name, a description, or a wallet and asset"
+            f"{where} needs an address, account, description, tx hash, "
+            "wallet and asset, or date, asset and amount"
         )
 
-    label = _optional_str(item, "label", where) or address or account or description or wallet
+    label = (
+        _optional_str(item, "label", where)
+        or address
+        or account
+        or description
+        or tx_hash
+        or wallet
+    )
     return RegistryEntry(
         label=label,
         address=address,
@@ -162,6 +205,9 @@ def _load_entry(value: object, where: str) -> RegistryEntry:
         description=description,
         wallet=wallet,
         asset=asset,
+        tx_hash=tx_hash,
+        on_date=on_date,
+        amount=amount,
     )
 
 
@@ -196,15 +242,53 @@ def _load_token_groups(value: object) -> List[TokenGroup]:
 
     groups: List[TokenGroup] = []
     for index, group in enumerate(value, start=1):
-        if not isinstance(group, list) or not group:
-            raise WalletRegistryError(f"token_groups[{index}] must be a non-empty list of symbols")
-        symbols = []
-        for symbol in group:
-            if not isinstance(symbol, str) or not symbol.strip():
-                raise WalletRegistryError(f"token_groups[{index}] symbols must be strings")
-            symbols.append(symbol.strip().upper())
-        groups.append(TokenGroup(symbols=tuple(symbols)))
+        groups.append(_load_one_group(group, index))
     return groups
+
+
+def _load_one_group(group: object, index: int) -> TokenGroup:
+    liquid = False
+    raw_symbols: object = group
+    if isinstance(group, dict):
+        if "symbols" not in group:
+            raise WalletRegistryError(f"token_groups[{index}] needs symbols")
+        raw_symbols = group["symbols"]
+        if "liquid" in group:
+            liquid = _parse_bool(group["liquid"], f"token_groups[{index}].liquid")
+    if not isinstance(raw_symbols, list) or not raw_symbols:
+        raise WalletRegistryError(f"token_groups[{index}] must be a non-empty list of symbols")
+    symbols = []
+    for symbol in raw_symbols:
+        if not isinstance(symbol, str) or not symbol.strip():
+            raise WalletRegistryError(f"token_groups[{index}] symbols must be strings")
+        symbols.append(symbol.strip().upper())
+    return TokenGroup(symbols=tuple(symbols), liquid=liquid)
+
+
+def _load_spam(value: object) -> Tuple[List[str], List[str]]:
+    if value is None:
+        return [], []
+    item = _require_mapping(value, "spam")
+    unknown = set(item) - {"symbols", "patterns"}
+    if unknown:
+        names = ", ".join(sorted(str(name) for name in unknown))
+        raise WalletRegistryError(f"spam has unknown keys: {names}")
+    return _string_list(item.get("symbols"), "spam.symbols"), [
+        pattern.casefold() for pattern in _string_list(item.get("patterns"), "spam.patterns")
+    ]
+
+
+def _string_list(value: object, name: str) -> List[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise WalletRegistryError(f"{name} must be a list of strings")
+    texts = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise WalletRegistryError(f"{name} entries must be strings")
+        texts.append(item.strip())
+    return texts
 
 
 def _require_mapping(value: object, name: str) -> Dict[str, Any]:

@@ -601,9 +601,10 @@ def test_report_files_list_the_review_columns(tmp_path: Path) -> None:
     ]
     assert rows[1][1:] == ["ETH", "4", "Exchange", OTHER, "0xreview", "", "needs-review"]
 
-    stem, review = reconciliation_report_paths(str(tmp_path / "records.xlsx"))
+    stem, review, spam = reconciliation_report_paths(str(tmp_path / "records.xlsx"))
     assert stem.endswith("records-transfer-summary.csv")
     assert review.endswith("records-needs-review.csv")
+    assert spam.endswith("records-possible-spam.csv")
 
 
 def test_example_registry_loads() -> None:
@@ -887,3 +888,56 @@ def test_share_pools_leaves_a_wrap_as_a_trade_when_disabled() -> None:
     assert trade.t_record.t_type is TrType.TRADE
     assert trade.t_record.sell_asset == "WETH"
     assert trade.t_record.buy_asset == "ETH"
+
+
+def test_spam_symbols_are_separated_from_needs_review() -> None:
+    real = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Exchange", destination=OTHER)
+    spam = _make(TrType.GIFT_SENT, BASE, "SCAMCLAIM", "9", "Exchange", destination=OTHER)
+    registry = _registry()
+    registry.spam_symbols = ["SCAMCLAIM"]
+    registry.spam_patterns = ["claim"]
+    result = _run(real, spam, registry=registry)
+    assert real.t_record is not None and real.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert spam.t_record is not None and str(spam.t_record.t_type) == "_Possible-Spam"
+    assert len(result.review) == 1
+    assert result.review[0].asset == "ETH"
+    assert len(result.spam) == 1
+    assert result.spam[0].asset == "SCAMCLAIM"
+    assert result.spam[0].disposition == "possible-spam"
+
+
+def test_payee_rule_can_target_one_transaction() -> None:
+    by_hash = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Exchange", tx_hash="0xabc")
+    lookalike = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Exchange", tx_hash="0xother")
+    by_amount = _make(TrType.GIFT_SENT, BASE, "BTC", "0.5", "Exchange")
+    other_amount = _make(TrType.GIFT_SENT, BASE, "BTC", "0.6", "Exchange")
+    registry = _registry(
+        payees=[
+            RegistryEntry(label="Hashed", tx_hash="0xABC"),
+            RegistryEntry(label="Dated", on_date="2024-06-01", asset="BTC", amount="0.5"),
+        ]
+    )
+    result = _run(by_hash, lookalike, by_amount, other_amount, registry=registry)
+    assert by_hash.t_record is not None and by_hash.t_record.t_type is TrType.GIFT_SENT
+    assert by_amount.t_record is not None and by_amount.t_record.t_type is TrType.GIFT_SENT
+    assert lookalike.t_record is not None and lookalike.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert other_amount.t_record is not None and other_amount.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert _actions(result).count("payee-disposal") == 2
+
+
+def test_liquid_staking_group_keeps_the_original_symbol_in_the_note() -> None:
+    trade = _make(TrType.TRADE, BASE, "stETH", "0.9", "Wallet")
+    assert trade.t_record is not None
+    trade.t_record.sell_asset = "ETH"
+    trade.t_record.sell_quantity = Decimal("1")
+    trade.t_record.buy_asset = "stETH"
+    trade.t_record.buy_quantity = Decimal("0.9")
+    rows = [trade]
+    registry = _registry(share_pools=True)
+    registry.match.token_groups = [TokenGroup(("ETH", "STETH"), liquid=True)]
+    result = reconcile_transfers(rows, registry, containers=[rows])
+    assert trade.t_record.t_type is TrType.TRADE
+    assert trade.t_record.sell_asset == "ETH"
+    assert trade.t_record.buy_asset == "ETH"
+    assert "liquid staking rebase ETH/stETH into ETH" in trade.t_record.note
+    assert "liquid-stake" in _actions(result)

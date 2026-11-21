@@ -336,6 +336,34 @@ def test_liquidity_fee_and_multi_trade_tags() -> None:
     assert multi.t_record.sell_asset == "ETH"
     assert multi.t_record.buy_asset == "BTC"
 
+    lp_in = _parse_tax_report(
+        **{
+            "Date": "2024-06-05 12:00:00",
+            "Type": "crypto_deposit",
+            "Tag": "Liquidity in",
+            "Receiving Wallet": "Exchange",
+            "Received Amount": "1",
+            "Received Currency": "LP-ETH",
+        }
+    )
+    assert lp_in.t_record is not None
+    assert lp_in.t_record.t_type is TrType.GIFT_RECEIVED
+    assert lp_in.t_record.buy_asset == "LP-ETH"
+
+    lp_out = _parse_tax_report(
+        **{
+            "Date": "2024-06-06 12:00:00",
+            "Type": "crypto_withdrawal",
+            "Tag": "Liquidity out",
+            "Sending Wallet": "Exchange",
+            "Sent Amount": "1",
+            "Sent Currency": "LP-ETH",
+        }
+    )
+    assert lp_out.t_record is not None
+    assert lp_out.t_record.t_type is TrType.SPEND
+    assert lp_out.t_record.sell_asset == "LP-ETH"
+
 
 def test_value_falls_back_to_net_worth() -> None:
     data_row = _parse(

@@ -276,3 +276,19 @@ def test_coingecko_null_current_price_returns_none() -> None:
 
     source._get_json = missing_map  # type: ignore[assignment]
     assert source.get_latest(AssetSymbol("ETH"), QuoteSymbol("GBP"), AssetId("ethereum")) is None
+
+
+def test_price_requests_use_a_bounded_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    source = DataSourceBase()
+    session = Mock()
+    response = Mock(status_code=200, reason="OK")
+    response.json.return_value = {"ok": True}
+    session.get.return_value = response
+    monkeypatch.setattr(source, "_get_session", lambda: session)
+    monkeypatch.setattr(source, "_rate_limit", lambda: None)
+    assert source._get_json("https://example.test/price") == {"ok": True}
+    assert session.get.call_args.kwargs["timeout"] == (
+        DataSourceBase.CONNECT_TIMEOUT,
+        DataSourceBase.READ_TIMEOUT,
+    )
+    assert DataSourceBase.MAX_RETRY_AFTER == 15

@@ -23,6 +23,12 @@ payees:
   - label: Exchange BTC cash-out
     wallet: Example Exchange
     asset: BTC
+  - label: One withdrawal
+    tx_hash: "0xexamplehash"
+  - label: One dated withdrawal
+    date: "2024-06-01"
+    asset: ETH
+    amount: "1.5"
 
 match:
   # Koinly's default window is about 24 hours.
@@ -42,3 +48,15 @@ match:
 token_groups:
   - [ETH, WETH]
   - [BTC, cbBTC]
+  # Non-1:1 liquid staking. Only used when match.share_pools is true.
+  # An accountant must confirm this is not a disposal.
+  - symbols: [ETH, stETH]
+    liquid: true
+
+# Lookalike and spam tickers. They are listed in possible-spam, not needs-review.
+spam:
+  symbols:
+    - USDT.e
+    - USDC.e
+  patterns:
+    - claim

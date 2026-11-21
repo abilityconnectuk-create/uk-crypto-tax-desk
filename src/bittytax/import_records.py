@@ -13,8 +13,14 @@ from openpyxl.cell.cell import Cell, MergedCell
 from tqdm import tqdm, trange
 
 from .config import config
-from .constants import ERROR, FONT_COLOR_TX_DEST, FONT_COLOR_TX_HASH, FONT_COLOR_TX_SRC
-from .exceptions import TransactionParserError
+from .constants import (
+    ERROR,
+    FONT_COLOR_TX_DEST,
+    FONT_COLOR_TX_HASH,
+    FONT_COLOR_TX_SRC,
+    WARNING,
+)
+from .exceptions import SkippedTransaction, TransactionParserError
 from .t_record import TransactionRecord
 from .t_row import TransactionRow, TxRaw
 from .utils import bt_tqdm_write, disable_tqdm
@@ -74,21 +80,9 @@ class ImportRecords:
                     row[: len(TransactionRow.HEADER)], row_num + 1, filename, worksheet.title
                 )
 
-                try:
-                    t_row.parse()
-                except TransactionParserError as e:
-                    t_row.failure = e
-                else:
+                self._parse_imported_row(t_row)
+                if t_row.t_record is not None:
                     t_row.tx_raw = self.get_tx_raw_xlsx(worksheet_row)
-
-                if config.debug or t_row.failure:
-                    bt_tqdm_write(f"{Fore.YELLOW}import: {t_row}")
-
-                if t_row.failure:
-                    bt_tqdm_write(f"{ERROR} {t_row.failure}")
-
-                self.t_rows.append(t_row)
-                self.update_cnts(t_row)
 
         workbook.close()
         del workbook
@@ -125,19 +119,7 @@ class ImportRecords:
                     row[: len(TransactionRow.HEADER)], row_num + 1, filename, worksheet.name
                 )
 
-                try:
-                    t_row.parse()
-                except TransactionParserError as e:
-                    t_row.failure = e
-
-                if config.debug or t_row.failure:
-                    bt_tqdm_write(f"{Fore.YELLOW}import: {t_row}")
-
-                if t_row.failure:
-                    bt_tqdm_write(f"{ERROR} {t_row.failure}")
-
-                self.t_rows.append(t_row)
-                self.update_cnts(t_row)
+                self._parse_imported_row(t_row)
 
         workbook.release_resources()
         del workbook
@@ -213,19 +195,24 @@ class ImportRecords:
                 continue
 
             t_row = TransactionRow(row[: len(TransactionRow.HEADER)], reader.line_num, filename)
-            try:
-                t_row.parse()
-            except TransactionParserError as e:
-                t_row.failure = e
+            self._parse_imported_row(t_row)
 
-            if config.debug or t_row.failure:
-                bt_tqdm_write(f"{Fore.YELLOW}import: {t_row}")
+    def _parse_imported_row(self, t_row: "TransactionRow") -> None:
+        try:
+            t_row.parse()
+        except SkippedTransaction as exc:
+            bt_tqdm_write(f"{WARNING} {exc}")
+        except TransactionParserError as exc:
+            t_row.failure = exc
 
-            if t_row.failure:
-                bt_tqdm_write(f"{ERROR} {t_row.failure}")
+        if config.debug or t_row.failure:
+            bt_tqdm_write(f"{Fore.YELLOW}import: {t_row}")
 
-            self.t_rows.append(t_row)
-            self.update_cnts(t_row)
+        if t_row.failure:
+            bt_tqdm_write(f"{ERROR} {t_row.failure}")
+
+        self.t_rows.append(t_row)
+        self.update_cnts(t_row)
 
     def update_cnts(self, t_row: "TransactionRow") -> None:
         if t_row.failure is not None:

@@ -53,6 +53,9 @@ KOINLY_D_MAPPING = {
     # Confirm with an accountant: this assumes the matching liquidity-in was a disposal.
     "Liquidity out": TrType.GIFT_RECEIVED,
     "liquidity_out": TrType.GIFT_RECEIVED,
+    # The LP-token leg of a liquidity-in is a deposit. Map it as well as the sent leg.
+    "Liquidity in": TrType.GIFT_RECEIVED,
+    "liquidity_in": TrType.GIFT_RECEIVED,
     "Multi trade": TrType.GIFT_RECEIVED,
     "multi_trade": TrType.GIFT_RECEIVED,
 }
@@ -81,6 +84,9 @@ KOINLY_W_MAPPING = {
     # treatment is not settled; confirm before relying on these rows.
     "Liquidity in": TrType.SPEND,
     "liquidity_in": TrType.SPEND,
+    # Removing the LP token is a withdrawal. Map it as well as the tokens received.
+    "Liquidity out": TrType.SPEND,
+    "liquidity_out": TrType.SPEND,
     "Other fee": TrType.SPEND,
     "other_fee": TrType.SPEND,
     "Multi trade": TrType.SPEND,

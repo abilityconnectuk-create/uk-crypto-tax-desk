@@ -1,0 +1,23 @@
+{% if liquid_staking %}
+    <h2>Liquid staking pooled ({{ liquid_staking|length }})</h2>
+    <p>
+        These tokens were pooled with their canonical asset and are not a one-to-one wrap.
+        Cost was carried across. An accountant must confirm this is not a disposal.
+    </p>
+    <table>
+        <tr>
+            <th>Date</th>
+            <th>Pooled asset</th>
+            <th>Quantity</th>
+            <th>Detail</th>
+        </tr>
+        {% for item in liquid_staking %}
+            <tr>
+                <td>{{ item.date }}</td>
+                <td>{{ item.asset }}</td>
+                <td align="right">{{ item.quantity }}</td>
+                <td>{{ item.detail }}</td>
+            </tr>
+        {% endfor %}
+    </table>
+{% endif %}

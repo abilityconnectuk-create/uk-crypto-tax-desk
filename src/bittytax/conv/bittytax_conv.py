@@ -157,11 +157,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--review-as",
-        choices=["reject", "disposal", "transfer"],
+        choices=["reject", "market", "disposal", "transfer"],
         default="reject",
         help="how unmatched needs-review rows are written. reject keeps _Needs-Review. "
-        "disposal writes Gift-Sent/Gift-Received. transfer writes Withdrawal/Deposit. "
-        "disposal and transfer are assumptions and are warned about.",
+        "market (recommended) acquires deposits at market value and withdrawals as transfers. "
+        "disposal writes gifts. transfer writes transfers for both. Confirm every row.",
     )
 
     args = parser.parse_args()
@@ -268,12 +268,13 @@ def _run_transfer_reconciliation(parser: argparse.ArgumentParser, args: argparse
         review_as=args.review_as,
         containers=[data_file.data_rows for data_file in DataFile.data_files_ordered],
     )
-    summary_path, review_path = reconciliation_report_paths(args.output_filename)
-    write_reconciliation_reports(result, summary_path, review_path)
+    summary_path, review_path, spam_path = reconciliation_report_paths(args.output_filename)
+    write_reconciliation_reports(result, summary_path, review_path, spam_path)
     sys.stderr.write(f"{Fore.WHITE}{format_reconciliation_message(result)}\n")
     sys.stderr.write(
         f"{Fore.WHITE}transfer summary: {Fore.YELLOW}{os.path.abspath(summary_path)}\n"
         f"{Fore.WHITE}needs review: {Fore.YELLOW}{os.path.abspath(review_path)}\n"
+        f"{Fore.WHITE}possible spam: {Fore.YELLOW}{os.path.abspath(spam_path)}\n"
     )
 
 
