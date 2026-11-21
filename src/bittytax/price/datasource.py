@@ -957,13 +957,21 @@ class CoinGecko(DataSourceBase):
             f"{self.api_root}/coins/{asset_id}"
             f"?localization=false&community_data=false&developer_data=false"
         )
-        return (
-            Decimal(repr(json_resp["market_data"]["current_price"][quote.lower()]))
-            if "market_data" in json_resp
-            and "current_price" in json_resp["market_data"]
-            and quote.lower() in json_resp["market_data"]["current_price"]
-            else None
-        )
+        if not isinstance(json_resp, dict):
+            return None
+        market = json_resp.get("market_data")
+        if not isinstance(market, dict):
+            return None
+        prices = market.get("current_price")
+        if not isinstance(prices, dict):
+            return None
+        price = prices.get(quote.lower())
+        if price is None:
+            return None
+        try:
+            return Decimal(repr(price))
+        except (ArithmeticError, ValueError, TypeError):
+            return None
 
     def get_historical(
         self,

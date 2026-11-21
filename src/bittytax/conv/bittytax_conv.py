@@ -152,7 +152,16 @@ def main() -> None:
     parser.add_argument(
         "--legacy-gift-withdrawals",
         action="store_true",
-        help="leave unmatched untagged withdrawals as Gift-Sent (previous Koinly behaviour)",
+        help="leave unmatched untagged withdrawals and deposits as Gift-Sent and "
+        "Gift-Received (previous Koinly behaviour)",
+    )
+    parser.add_argument(
+        "--review-as",
+        choices=["reject", "disposal", "transfer"],
+        default="reject",
+        help="how unmatched needs-review rows are written. reject keeps _Needs-Review. "
+        "disposal writes Gift-Sent/Gift-Received. transfer writes Withdrawal/Deposit. "
+        "disposal and transfer are assumptions and are warned about.",
     )
 
     args = parser.parse_args()
@@ -252,7 +261,13 @@ def _run_transfer_reconciliation(parser: argparse.ArgumentParser, args: argparse
     rows: List[DataRow] = []
     for data_file in DataFile.data_files_ordered:
         rows.extend(data_file.data_rows)
-    result = reconcile_transfers(rows, registry, legacy_gifts=args.legacy_gift_withdrawals)
+    result = reconcile_transfers(
+        rows,
+        registry,
+        legacy_gifts=args.legacy_gift_withdrawals,
+        review_as=args.review_as,
+        containers=[data_file.data_rows for data_file in DataFile.data_files_ordered],
+    )
     summary_path, review_path = reconciliation_report_paths(args.output_filename)
     write_reconciliation_reports(result, summary_path, review_path)
     sys.stderr.write(f"{Fore.WHITE}{format_reconciliation_message(result)}\n")

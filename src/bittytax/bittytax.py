@@ -26,6 +26,7 @@ from .price.exceptions import DataSourceApiError, DataSourceError
 from .price.valueasset import ValueAsset
 from .report import ReportLog, ReportPdf
 from .t_record import TransactionRecord
+from .t_row import TransactionRow
 from .tax import CalculateCapitalGains as CCG
 from .tax import TaxCalculator
 from .transactions import TransactionHistory
@@ -112,6 +113,14 @@ def _create_arg_parser(version_str: str) -> argparse.ArgumentParser:
         action="store_true",
         help="populate transaction records with price data in CSV format",
     )
+    parser.add_argument(
+        "--review-rows",
+        choices=["reject", "disposal", "transfer"],
+        default=None,
+        help="how to treat _Needs-Review rows: reject (default), "
+        "disposal (Gift-Sent/Gift-Received), or transfer (Withdrawal/Deposit). "
+        "disposal and transfer print a warning and a count. Confirm every row.",
+    )
     return parser
 
 
@@ -144,8 +153,12 @@ def _run(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
         config.start_of_year_month = TAX_RULES_UK_COMPANY.index(args.tax_rules) + 1
         config.start_of_year_day = 1
 
+    if args.review_rows:
+        config.config["review_rows"] = args.review_rows
+
     try:
         transaction_records = _do_import(args.filename)
+        _warn_review_rows()
     except IOError:
         parser.exit(message=f"{ERROR} File could not be read: {args.filename}\n")
     except ImportFailureError:
@@ -218,7 +231,20 @@ def _validate_year(value: str) -> int:
     return year
 
 
+def _warn_review_rows() -> None:
+    count = TransactionRow.review_assumed_count
+    if not count:
+        return
+    treatment = str(config.review_rows)
+    print(
+        f"{WARNING} {count} needs-review transaction(s) were treated as {treatment}. "
+        "Confirm each one before relying on this report. "
+        "Transfers can hide real disposals. Disposals can overstate gains."
+    )
+
+
 def _do_import(filename: str) -> List[TransactionRecord]:
+    TransactionRow.review_assumed_count = 0
     import_records = ImportRecords()
 
     if filename:

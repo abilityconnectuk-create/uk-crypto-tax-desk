@@ -52,6 +52,10 @@ class TxRaw:
 
 
 class TransactionRow:
+    NEEDS_REVIEW_TYPE = "_Needs-Review"
+    REVIEW_NOTE = "review row treated as"
+    review_assumed_count = 0
+
     HEADER = [
         "Type",
         "Buy Quantity",
@@ -440,12 +444,7 @@ class TransactionRow:
             # Skip empty rows
             return
 
-        try:
-            t_type = TrType(self.row_dict["Type"])
-        except ValueError as e:
-            raise UnexpectedTransactionTypeError(
-                self.HEADER.index("Type"), "Type", self.row_dict["Type"]
-            ) from e
+        t_type = self._resolve_type()
 
         buy_quantity = sell_quantity = fee_quantity = None
         buy_asset = sell_asset = fee_asset = AssetSymbol("")
@@ -528,6 +527,12 @@ class TransactionRow:
                     if not config.transfer_fee_disposal:
                         fee.disposal = False
 
+        if (
+            self.REVIEW_NOTE in self.row_dict["Note"]
+            and self.row_dict["Type"] != self.NEEDS_REVIEW_TYPE
+        ):
+            TransactionRow.review_assumed_count += 1
+
         self.t_record = TransactionRecord(
             t_type,
             buy,
@@ -538,6 +543,37 @@ class TransactionRow:
             Note(self.row_dict["Note"]),
             self,
         )
+
+    def _resolve_type(self) -> TrType:
+        raw = self.row_dict["Type"]
+        try:
+            return TrType(raw)
+        except ValueError as exc:
+            if raw != self.NEEDS_REVIEW_TYPE:
+                raise UnexpectedTransactionTypeError(
+                    self.HEADER.index("Type"), "Type", raw
+                ) from exc
+            return self._review_override(exc)
+
+    def _review_override(self, exc: ValueError) -> TrType:
+        treatment = str(config.review_rows)
+        if treatment not in ("disposal", "transfer"):
+            raise UnexpectedTransactionTypeError(
+                self.HEADER.index("Type"),
+                "Type",
+                f"{self.NEEDS_REVIEW_TYPE} (set review_rows to disposal or transfer to continue)",
+            ) from exc
+
+        has_buy = bool(self.row_dict["Buy Quantity"] or self.row_dict["Buy Asset"])
+        has_sell = bool(self.row_dict["Sell Quantity"] or self.row_dict["Sell Asset"])
+        TransactionRow.review_assumed_count += 1
+        if has_sell and not has_buy:
+            return TrType.GIFT_SENT if treatment == "disposal" else TrType.WITHDRAWAL
+        if has_buy and not has_sell:
+            return TrType.GIFT_RECEIVED if treatment == "disposal" else TrType.DEPOSIT
+        raise UnexpectedTransactionTypeError(
+            self.HEADER.index("Type"), "Type", self.NEEDS_REVIEW_TYPE
+        ) from exc
 
     def parse_timestamp(self) -> Timestamp:
         try:

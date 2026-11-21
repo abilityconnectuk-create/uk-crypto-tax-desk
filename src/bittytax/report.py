@@ -21,6 +21,7 @@ from .bt_types import TAX_RULES_UK_COMPANY, AssetName, AssetSymbol, Date, Note, 
 from .config import config
 from .constants import _H1, ERROR, H1, TERMINAL_POWERSHELL_GUI
 from .price.pricedata import PriceDataRecord
+from .t_row import TransactionRow
 from .tax import (
     CalculateCapitalGains,
     CalculateIncome,
@@ -87,6 +88,8 @@ class ReportPdf:
                     "config": config,
                     "args": args,
                     "tax_report": tax_report,
+                    "review_count": TransactionRow.review_assumed_count,
+                    "review_treatment": config.review_rows,
                 }
             )
         else:
@@ -102,6 +105,8 @@ class ReportPdf:
                     "tax_report": tax_report,
                     "price_report": price_report,
                     "holdings_report": holdings_report,
+                    "review_count": TransactionRow.review_assumed_count,
+                    "review_treatment": config.review_rows,
                 }
             )
 
@@ -231,9 +236,22 @@ class ReportLog:
             if price_report is None:
                 raise RuntimeError("Missing price_report")
 
+            self._print_review_warning()
             self._tax_full(args.tax_rules, audit, tax_report, price_report, holdings_report)
 
+    def _print_review_warning(self) -> None:
+        count = TransactionRow.review_assumed_count
+        if not count:
+            return
+        print(
+            f"\n{Fore.RED}{Style.BRIGHT}WARNING: {count} needs-review transaction(s) "
+            f"were treated as {config.review_rows}. Confirm each one before relying "
+            f"on this report. Transfers can hide real disposals. "
+            f"Disposals can overstate gains.{Style.NORMAL}"
+        )
+
     def _tax_summary(self, tax_rules: TaxRules, tax_report: Dict[Year, TaxReportRecord]) -> None:
+        self._print_review_warning()
         print(f"{Fore.WHITE}tax report output:")
         for tax_year in sorted(tax_report):
             print(

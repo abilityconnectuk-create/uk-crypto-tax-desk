@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from datetime import timedelta
 from decimal import Decimal
-from typing import Any, Dict, FrozenSet, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import yaml
 
@@ -18,6 +18,19 @@ class RegistryEntry:
     address: str = ""
     account: str = ""
     chain: str = ""
+    description: str = ""
+    wallet: str = ""
+    asset: str = ""
+
+
+@dataclass
+class TokenGroup:
+    """Symbols that may be one holding. The first symbol is the shared-pool name."""
+
+    symbols: Tuple[str, ...]
+
+    def canonical(self) -> str:
+        return self.symbols[0]
 
 
 @dataclass
@@ -25,7 +38,8 @@ class MatchSettings:
     window: timedelta = timedelta(hours=24)
     amount_tolerance: Decimal = Decimal("0.02")
     amount_tolerance_abs: Decimal = Decimal(0)
-    token_groups: List[FrozenSet[str]] = field(default_factory=list)
+    token_groups: List[TokenGroup] = field(default_factory=list)
+    share_pools: bool = False
 
 
 @dataclass
@@ -36,8 +50,8 @@ class WalletRegistry:
 
 
 _TOP_LEVEL = {"own", "payees", "match", "token_groups"}
-_ENTRY_KEYS = {"label", "address", "account", "chain"}
-_MATCH_KEYS = {"window_hours", "amount_tolerance", "amount_tolerance_abs"}
+_ENTRY_KEYS = {"label", "address", "account", "chain", "description", "wallet", "asset"}
+_MATCH_KEYS = {"window_hours", "amount_tolerance", "amount_tolerance_abs", "share_pools"}
 
 
 def load_wallet_registry(path: str) -> WalletRegistry:
@@ -129,15 +143,25 @@ def _load_entry(value: object, where: str) -> RegistryEntry:
 
     address = _optional_str(item, "address", where)
     account = _optional_str(item, "account", where)
-    if not address and not account:
-        raise WalletRegistryError(f"{where} needs an address or an account name")
+    description = _optional_str(item, "description", where)
+    wallet = _optional_str(item, "wallet", where)
+    asset = _optional_str(item, "asset", where).upper()
+    if wallet and not asset and not (address or account or description):
+        raise WalletRegistryError(f"{where} wallet rule needs an asset")
+    if not (address or account or description or (wallet and asset)):
+        raise WalletRegistryError(
+            f"{where} needs an address, an account name, a description, or a wallet and asset"
+        )
 
-    label = _optional_str(item, "label", where) or address or account
+    label = _optional_str(item, "label", where) or address or account or description or wallet
     return RegistryEntry(
         label=label,
         address=address,
         account=account,
         chain=_optional_str(item, "chain", where),
+        description=description,
+        wallet=wallet,
+        asset=asset,
     )
 
 
@@ -159,16 +183,18 @@ def _load_match(value: object) -> MatchSettings:
         settings.amount_tolerance_abs = _parse_tolerance(
             item["amount_tolerance_abs"], "amount_tolerance_abs"
         )
+    if "share_pools" in item:
+        settings.share_pools = _parse_bool(item["share_pools"], "share_pools")
     return settings
 
 
-def _load_token_groups(value: object) -> List[FrozenSet[str]]:
+def _load_token_groups(value: object) -> List[TokenGroup]:
     if value is None:
         return []
     if not isinstance(value, list):
         raise WalletRegistryError("token_groups must be a list of symbol lists")
 
-    groups: List[FrozenSet[str]] = []
+    groups: List[TokenGroup] = []
     for index, group in enumerate(value, start=1):
         if not isinstance(group, list) or not group:
             raise WalletRegistryError(f"token_groups[{index}] must be a non-empty list of symbols")
@@ -177,7 +203,7 @@ def _load_token_groups(value: object) -> List[FrozenSet[str]]:
             if not isinstance(symbol, str) or not symbol.strip():
                 raise WalletRegistryError(f"token_groups[{index}] symbols must be strings")
             symbols.append(symbol.strip().upper())
-        groups.append(frozenset(symbols))
+        groups.append(TokenGroup(symbols=tuple(symbols)))
     return groups
 
 
@@ -194,6 +220,18 @@ def _optional_str(item: Dict[str, Any], key: str, where: str) -> str:
     if not isinstance(value, str):
         raise WalletRegistryError(f"{where}.{key} must be a string")
     return value.strip()
+
+
+def _parse_bool(value: object, name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        folded = value.strip().casefold()
+        if folded in ("true", "yes", "1"):
+            return True
+        if folded in ("false", "no", "0"):
+            return False
+    raise WalletRegistryError(f"{name} must be true or false")
 
 
 def _parse_decimal(value: object, name: str) -> Decimal:

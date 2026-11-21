@@ -26,6 +26,7 @@ from bittytax.conv.transfer_match import (
 from bittytax.conv.wallets import (
     MatchSettings,
     RegistryEntry,
+    TokenGroup,
     WalletRegistry,
     WalletRegistryError,
     load_wallet_registry,
@@ -97,7 +98,9 @@ def _settings(
         window=timedelta(hours=hours),
         amount_tolerance=Decimal(tolerance),
         amount_tolerance_abs=Decimal(abs_tol),
-        token_groups=[frozenset(symbol.upper() for symbol in group) for group in groups or []],
+        token_groups=[
+            TokenGroup(tuple(symbol.upper() for symbol in group)) for group in groups or []
+        ],
     )
 
 
@@ -107,12 +110,11 @@ def _registry(
     groups: Optional[Sequence[Sequence[str]]] = None,
     hours: int = 24,
     tolerance: str = "0.02",
+    share_pools: bool = False,
 ) -> WalletRegistry:
-    return WalletRegistry(
-        own=list(own or []),
-        payees=list(payees or []),
-        match=_settings(groups=groups, hours=hours, tolerance=tolerance),
-    )
+    settings = _settings(groups=groups, hours=hours, tolerance=tolerance)
+    settings.share_pools = share_pools
+    return WalletRegistry(own=list(own or []), payees=list(payees or []), match=settings)
 
 
 def _ledger() -> RegistryEntry:
@@ -200,9 +202,19 @@ def _make(
 
 
 def _run(
-    *rows: DataRow, registry: Optional[WalletRegistry] = None, legacy: bool = False
+    *rows: DataRow,
+    registry: Optional[WalletRegistry] = None,
+    legacy: bool = False,
+    review_as: str = "reject",
 ) -> ReconcileResult:
-    return reconcile_transfers(rows, registry or _registry(), legacy_gifts=legacy)
+    row_list = list(rows)
+    return reconcile_transfers(
+        row_list,
+        registry or _registry(),
+        legacy_gifts=legacy,
+        review_as=review_as,
+        containers=[row_list],
+    )
 
 
 def _actions(result: ReconcileResult) -> List[str]:
@@ -350,8 +362,8 @@ def test_amount_inside_tolerance_matches_and_outside_does_not() -> None:
     far_in = _make(TrType.GIFT_RECEIVED, BASE, "ETH", "0.90", "Ledger")
     far = _run(far_out, far_in)
     assert far_out.t_record is not None and far_out.t_record.t_type == NEEDS_REVIEW_TYPE
-    assert far_in.t_record is not None and far_in.t_record.t_type is TrType.GIFT_RECEIVED
-    assert _actions(far) == ["needs-review"]
+    assert far_in.t_record is not None and far_in.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert _actions(far) == ["needs-review", "needs-review"]
 
 
 def test_time_window_accepts_the_boundary_and_rejects_past_it() -> None:
@@ -371,7 +383,7 @@ def test_time_window_accepts_the_boundary_and_rejects_past_it() -> None:
     )
     missed = _run(early, late)
     assert early.t_record is not None and early.t_record.t_type == NEEDS_REVIEW_TYPE
-    assert late.t_record is not None and late.t_record.t_type is TrType.GIFT_RECEIVED
+    assert late.t_record is not None and late.t_record.t_type == NEEDS_REVIEW_TYPE
     assert missed.review[0].disposition == "needs-review"
     assert missed.review[0].tx_hash == "0xlate"
 
@@ -388,8 +400,8 @@ def test_same_wallet_does_not_match() -> None:
     received = _make(TrType.GIFT_RECEIVED, BASE, "ETH", "1", "Exchange")
     result = _run(sent, received)
     assert sent.t_record is not None and sent.t_record.t_type == NEEDS_REVIEW_TYPE
-    assert received.t_record is not None and received.t_record.t_type is TrType.GIFT_RECEIVED
-    assert _actions(result) == ["needs-review"]
+    assert received.t_record is not None and received.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert _actions(result) == ["needs-review", "needs-review"]
 
 
 def test_token_variant_pairs_only_when_configured() -> None:
@@ -397,7 +409,8 @@ def test_token_variant_pairs_only_when_configured() -> None:
     received = _make(TrType.GIFT_RECEIVED, BASE + timedelta(minutes=10), "ETH", "2", "Ledger")
     missed = _run(sent, received)
     assert sent.t_record is not None and sent.t_record.t_type == NEEDS_REVIEW_TYPE
-    assert _actions(missed) == ["needs-review"]
+    assert received.t_record is not None and received.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert _actions(missed) == ["needs-review", "needs-review"]
 
     grouped_out = _make(TrType.GIFT_SENT, BASE, "WETH", "2", "Exchange")
     grouped_in = _make(TrType.GIFT_RECEIVED, BASE, "cbBTC", "2", "Ledger")
@@ -406,7 +419,8 @@ def test_token_variant_pairs_only_when_configured() -> None:
         grouped_out, grouped_in, registry=_registry(groups=[["ETH", "WETH"], ["BTC", "CBBTC"]])
     )
     assert grouped_out.t_record is not None and grouped_out.t_record.t_type == NEEDS_REVIEW_TYPE
-    assert _actions(wrong) == ["needs-review"]
+    assert grouped_in.t_record is not None and grouped_in.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert _actions(wrong) == ["needs-review", "needs-review"]
 
     eth_out = _make(TrType.GIFT_SENT, BASE, "WETH", "2", "Exchange", tx_hash="0xwrap")
     eth_in = _make(TrType.GIFT_RECEIVED, BASE, "ETH", "2", "Ledger", tx_hash="0xwrap")
@@ -466,9 +480,8 @@ def test_payee_send_stays_a_disposal_even_when_a_deposit_matches() -> None:
     result = _run(sent, received, registry=_registry(payees=[_payee()]))
     assert sent.t_record is not None and sent.t_record.t_type is TrType.GIFT_SENT
     assert sent.t_record.sell_value == Decimal("50")
-    assert received.t_record is not None and received.t_record.t_type is TrType.GIFT_RECEIVED
-    assert _actions(result) == ["payee-disposal"]
-    assert result.review == []
+    assert received.t_record is not None and received.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert _actions(result) == ["payee-disposal", "needs-review"]
 
 
 def test_explicit_gift_is_not_matched_or_sent_to_review() -> None:
@@ -544,14 +557,14 @@ def test_existing_withdrawal_and_deposit_keep_their_quantities() -> None:
     assert result.review == []
 
 
-def test_same_tx_hash_wins_over_a_closer_amount() -> None:
+def test_closest_amount_beats_a_shared_tx_hash() -> None:
     sent = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Exchange", tx_hash="0xhash")
     closer = _make(TrType.GIFT_RECEIVED, BASE, "ETH", "1", "Ledger", tx_hash="")
     hashed = _make(TrType.GIFT_RECEIVED, BASE, "ETH", "0.99", "Cold", tx_hash="0xHASH")
     _run(sent, closer, hashed)
-    assert hashed.t_record is not None and hashed.t_record.t_type is TrType.DEPOSIT
-    assert closer.t_record is not None and closer.t_record.t_type is TrType.GIFT_RECEIVED
-    assert sent.t_record is not None and sent.t_record.sell_quantity == Decimal("0.99")
+    assert closer.t_record is not None and closer.t_record.t_type is TrType.DEPOSIT
+    assert hashed.t_record is not None and hashed.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert sent.t_record is not None and sent.t_record.sell_quantity == Decimal("1")
 
 
 def test_trade_rows_are_ignored() -> None:
@@ -576,8 +589,17 @@ def test_report_files_list_the_review_columns(tmp_path: Path) -> None:
 
     with open(review_path, encoding="utf-8", newline="") as handle:
         rows = list(csv.reader(handle))
-    assert rows[0] == ["Date", "Asset", "Amount", "Wallet", "Destination", "TxHash", "Disposition"]
-    assert rows[1][1:] == ["ETH", "4", "Exchange", OTHER, "0xreview", "needs-review"]
+    assert rows[0] == [
+        "Date",
+        "Asset",
+        "Amount",
+        "Wallet",
+        "Destination",
+        "TxHash",
+        "Description",
+        "Disposition",
+    ]
+    assert rows[1][1:] == ["ETH", "4", "Exchange", OTHER, "0xreview", "", "needs-review"]
 
     stem, review = reconciliation_report_paths(str(tmp_path / "records.xlsx"))
     assert stem.endswith("records-transfer-summary.csv")
@@ -589,10 +611,13 @@ def test_example_registry_loads() -> None:
     assert len(registry.own) == 3
     assert registry.own[0].address == LEDGER
     assert registry.payees[0].label == "Example processor"
+    assert registry.payees[1].description == "card purchase"
+    assert registry.payees[2].asset == "BTC"
     assert registry.match.window == timedelta(hours=24)
     assert registry.match.amount_tolerance == Decimal("0.02")
-    assert frozenset({"ETH", "WETH"}) in registry.match.token_groups
-    assert frozenset({"BTC", "CBBTC"}) in registry.match.token_groups
+    assert registry.match.share_pools is False
+    assert registry.match.token_groups[0].symbols == ("ETH", "WETH")
+    assert registry.match.token_groups[1].symbols == ("BTC", "CBBTC")
 
 
 def test_registry_rejects_unknown_keys(tmp_path: Path) -> None:
@@ -742,3 +767,123 @@ def test_cli_writes_transfers_and_the_review_report(
     finally:
         DataFile.data_files.clear()
         DataFile.data_files_ordered.clear()
+
+
+def test_unmatched_deposit_is_review_not_a_gift() -> None:
+    received = _make(
+        TrType.GIFT_RECEIVED,
+        BASE,
+        "ETH",
+        "2",
+        "Ledger",
+        tx_hash="0xin",
+    )
+    received.row_dict["Description"] = "from somewhere"
+    result = _run(received)
+    assert received.t_record is not None
+    assert received.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert result.review[0].disposition == "needs-review"
+    assert result.review[0].description == "from somewhere"
+    assert result.review[0].wallet == "Ledger"
+
+
+def test_legacy_flag_keeps_an_unmatched_deposit() -> None:
+    received = _make(TrType.GIFT_RECEIVED, BASE, "ETH", "2", "Ledger")
+    result = _run(received, legacy=True)
+    assert received.t_record is not None
+    assert received.t_record.t_type is TrType.GIFT_RECEIVED
+    assert result.review[0].disposition == "kept-as-gift"
+
+
+def test_payee_matches_description_when_destination_is_blank() -> None:
+    sent = _make(TrType.GIFT_SENT, BASE, "ETH", "0.4", "Exchange", destination="")
+    assert sent.t_record is not None
+    sent.t_record.note = "Card purchase coffee"
+    sent.row_dict["Description"] = "Card purchase coffee"
+    payee = RegistryEntry(label="Card", description="card purchase")
+    result = _run(sent, registry=_registry(payees=[payee]))
+    assert sent.t_record.t_type is TrType.GIFT_SENT
+    assert _actions(result) == ["payee-disposal"]
+    assert result.review == []
+
+
+def test_payee_matches_wallet_and_asset_when_destination_is_blank() -> None:
+    sent = _make(TrType.GIFT_SENT, BASE, "BTC", "0.2", "Example Exchange", destination="")
+    payee = RegistryEntry(label="Cash-out", wallet="Example Exchange", asset="BTC")
+    result = _run(sent, registry=_registry(payees=[payee]))
+    assert sent.t_record is not None and sent.t_record.t_type is TrType.GIFT_SENT
+    assert _actions(result) == ["payee-disposal"]
+
+
+def test_blank_destination_without_a_payee_rule_is_still_reviewed() -> None:
+    sent = _make(
+        TrType.GIFT_SENT, BASE, "ETH", "0.4", "Exchange", destination="", tx_hash="0xblank"
+    )
+    sent.row_dict["Description"] = "to an external account"
+    result = _run(sent)
+    assert sent.t_record is not None and sent.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert result.review[0].destination == ""
+    assert result.review[0].description == "to an external account"
+    assert result.review[0].tx_hash == "0xblank"
+
+
+def test_mirror_movement_is_paired_only_once() -> None:
+    out_a = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "WalletA")
+    in_b = _make(TrType.GIFT_RECEIVED, BASE, "ETH", "1", "WalletB")
+    out_b = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "WalletB")
+    in_a = _make(TrType.GIFT_RECEIVED, BASE, "ETH", "1", "WalletA")
+    result = _run(out_a, in_b, out_b, in_a)
+    assert _actions(result).count("matched") == 1
+    assert out_a.t_record is not None and out_a.t_record.t_type is TrType.WITHDRAWAL
+    assert in_b.t_record is not None and in_b.t_record.t_type is TrType.DEPOSIT
+    assert out_b.t_record is not None and out_b.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert in_a.t_record is not None and in_a.t_record.t_type == NEEDS_REVIEW_TYPE
+
+
+def test_review_as_transfer_writes_a_transfer_instead_of_needs_review() -> None:
+    sent = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Exchange", destination=OTHER)
+    result = _run(sent, review_as="transfer")
+    assert sent.t_record is not None
+    assert sent.t_record.t_type is TrType.WITHDRAWAL
+    assert "review row treated as transfer" in sent.t_record.note
+    assert result.review[0].disposition == "assumed-transfer"
+    assert _actions(result) == ["assumed-transfer"]
+
+
+def test_share_pools_turns_a_wrap_into_a_transfer_of_the_canonical_asset() -> None:
+    trade = _make(TrType.TRADE, BASE, "WETH", "1", "Wallet")
+    assert trade.t_record is not None
+    trade.t_record.sell_asset = "WETH"
+    trade.t_record.sell_quantity = Decimal("1")
+    trade.t_record.buy_asset = "ETH"
+    trade.t_record.buy_quantity = Decimal("1")
+    later = _make(TrType.SPEND, BASE + timedelta(days=1), "WBTC", "0.5", "Wallet", tag="Cost")
+    rows = [trade, later]
+    result = reconcile_transfers(
+        rows,
+        _registry(groups=[["ETH", "WETH"], ["BTC", "WBTC"]], share_pools=True),
+        containers=[rows],
+    )
+    assert trade.t_record.t_type is TrType.WITHDRAWAL
+    assert trade.t_record.sell_asset == "ETH"
+    assert trade.t_record.buy_asset == ""
+    assert len(rows) == 3
+    deposit = rows[1].t_record
+    assert deposit is not None and deposit.t_type is TrType.DEPOSIT
+    assert deposit.buy_asset == "ETH"
+    assert deposit.buy_quantity == Decimal("1")
+    assert later.t_record is not None and later.t_record.sell_asset == "BTC"
+    assert "wrap" in _actions(result)
+
+
+def test_share_pools_leaves_a_wrap_as_a_trade_when_disabled() -> None:
+    trade = _make(TrType.TRADE, BASE, "WETH", "1", "Wallet")
+    assert trade.t_record is not None
+    trade.t_record.sell_asset = "WETH"
+    trade.t_record.sell_quantity = Decimal("1")
+    trade.t_record.buy_asset = "ETH"
+    trade.t_record.buy_quantity = Decimal("1")
+    _run(trade, registry=_registry(groups=[["ETH", "WETH"]], share_pools=False))
+    assert trade.t_record.t_type is TrType.TRADE
+    assert trade.t_record.sell_asset == "WETH"
+    assert trade.t_record.buy_asset == "ETH"

@@ -60,6 +60,10 @@ class Config:
         "price_via_btc": True,
         "usernames": [],
         "coinbase_zero_fees_are_gifts": False,
+        # reject: _Needs-Review fails the import.
+        # disposal: treat those rows as Gift-Sent / Gift-Received.
+        # transfer: treat those rows as Withdrawal / Deposit.
+        "review_rows": "reject",
         "binance_multi_bnb_split_even": False,
         "binance_statements_only": False,
     }

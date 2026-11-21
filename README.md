@@ -925,11 +925,21 @@ What the stage changes:
 | Destination is your own address or account | `Withdrawal` (and the matched deposit, if there is one, becomes `Deposit`) |
 | Untagged withdrawal paired with an untagged deposit, or with a `Deposit`, of the same asset or token group, in a different wallet, inside the window and tolerance | Both sides become `Withdrawal` and `Deposit`. The note says `transfer match N` |
 | Destination is a known payee | Left as a disposal |
-| Untagged withdrawal, nothing matched, not your address | Type `_Needs-Review`. It is not a gift and it is not a transfer |
+| Untagged withdrawal or deposit, nothing matched, not your address | Type `_Needs-Review`. It is not a gift and it is not a transfer. A blank destination is still listed, with the description |
 | Tag was an explicit gift, loss, cost, and the destination is not yours | Left as parsed. Not sent for review |
-| `--legacy-gift-withdrawals` | The unmatched untagged withdrawals stay `Gift-Sent` |
+| `--legacy-gift-withdrawals` | The unmatched untagged withdrawals stay `Gift-Sent` and the unmatched untagged deposits stay `Gift-Received` |
+| `--review-as disposal` or `bittytax --review-rows disposal` | Those rows are treated as `Gift-Sent` / `Gift-Received` so a report can be produced. Gains may be overstated |
+| `--review-as transfer` or `bittytax --review-rows transfer` | Those rows are treated as `Withdrawal` / `Deposit`. Real disposals can disappear from the gain |
 
 `--legacy-gift-withdrawals` only applies together with `--wallets` or `--match-transfers`. Without those flags the tool behaves as it always has, which is the same end result for untagged Koinly withdrawals.
+
+`_Needs-Review` is the default because treating every unmatched row as a withdrawal hides real disposals. To produce a tax report before you have classified them, set `review_rows` in `bittytax.conf` or pass `--review-rows disposal` or `--review-rows transfer` to `bittytax`. The same choice is `--review-as` on `bittytax_conv`. Either way the tool prints a warning and the tax report includes the count. Confirm every row. `disposal` can overstate gains. `transfer` can leave real disposals out.
+
+Payees do not need a destination address. A `description` is matched as a case-insensitive substring of the row description, and `wallet` together with `asset` marks sends of that asset from that wallet. Rows that still have a blank destination and match no payee rule stay on the needs-review list with the description filled in.
+
+`match.share_pools` is off unless you set it. When it is on, the first symbol in each `token_groups` entry is the Section 104 pool (so `BTC, WBTC, cbBTC` all pool as BTC), and a trade inside the group at about one-to-one is written as a transfer rather than a disposal. A plain rename of every symbol is not enough on its own: the wrap would become a same-asset trade and would reset the cost. This is an assumption an accountant must confirm. HMRC has not said that wrapping is not a disposal. A trade inside the group that is not about one-to-one stays a trade.
+
+Koinly amounts may contain thousands separators (`1,234.56`). Tags `Liquidity in` and `Other fee` are disposals (`Spend`). `Liquidity out` is an acquisition at the Koinly value and is not put through the income report. `Multi trade` with both a sent and a received amount is a `Trade`; a one-sided row follows the same disposal or acquisition mapping. Where the asset is already the local currency, the quantity is used as the value, because an FX round-trip of Koinly's net value often no longer matches the quantity and the accounting tool would reject the row. Liquidity-pool entries are a disposal on the way in and a new acquisition on the way out under this mapping. That is one reading, not HMRC guidance. Retag them as transfers if your accountant treats the pool as still yours.
 
 Two extra CSV files are written next to the conversion output (or as `BittyTax_Records-transfer-summary.csv` and `BittyTax_Records-needs-review.csv` when you do not pass `-o`):
 
