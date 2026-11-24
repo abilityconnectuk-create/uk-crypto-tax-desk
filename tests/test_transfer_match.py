@@ -627,6 +627,12 @@ def test_example_registry_loads() -> None:
     assert registry.contracts[1].category == "lp"
     assert registry.tax_treatment.lp == "review"
     assert registry.tax_treatment.collateral == "review"
+    assert registry.tax_treatment.stake == "review"
+    assert registry.match.same_wallet_swaps is False
+    assert registry.official_contracts[0].asset == "USDT"
+    assert registry.official_contracts[0].names == ("Tether USD",)
+    assert registry.poison_addresses[0].address.endswith("0b0b")
+    assert registry.contracts[3].category == "stake"
     assert registry.margin.suffixes == ("USDTM", "PERP")
     assert registry.count_exceptions[0].wallet == "Example Bot"
 

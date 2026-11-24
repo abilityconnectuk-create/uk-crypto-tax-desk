@@ -8,6 +8,11 @@ The price data cache format has been updated to correctly distinguish assets tha
 
 The new `price_via_btc` config option may not exist in your config file. If it is missing, BittyTax keeps the legacy BTC-intermediate behaviour for backward compatibility. Add `price_via_btc: False` to your config if you want historic prices to use direct local currency lookups.
 
+### Added
+- Conversion tool: `official_contracts` and `poison_addresses` mark address-poisoning rows as spam. A ticker that names an official asset but uses another contract, or a row whose source or destination is a configured poison address, is dropped. It is not a disposal, a transfer, or a wallet movement, and it is not merged into the official pool. The possible-spam file records the reason.
+- Conversion tool: `contracts` category `stake` is a configurable escrow, with `tax_treatment.stake` defaulting to `review`. No stake tax treatment is hard-coded.
+- Conversion tool: `match.same_wallet_swaps` (default off) pairs same-hash, different-asset legs on one wallet with a blank destination into one logged trade. LP and receipt tokens stay on the review queue.
+
 ### Fixed
 - Reconciliation: a holdings summary row named Total, Totals, Grand Total or Subtotal is not compared as an asset.
 - Reconciliation: pool cost compares the union of the Koinly costs and the engine pool, so an engine-only leftover pool fails P2.

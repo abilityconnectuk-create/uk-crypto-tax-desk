@@ -62,6 +62,8 @@ class MatchSettings:  # pylint: disable=too-many-instance-attributes
     official_assets: Tuple[str, ...] = ("USDT", "BTC", "ETH")
     blocked_symbols: Tuple[str, ...] = ()
     blocked_patterns: Tuple[str, ...] = ()
+    # Off until the user opts in. A blank-destination exchange row is not a trade by itself.
+    same_wallet_swaps: bool = False
 
 
 @dataclass
@@ -86,10 +88,21 @@ class MarginRules:
 
 @dataclass
 class TaxTreatment:
-    """LP and collateral are not confirmed. The default leaves them on the queue."""
+    """LP, collateral and stake are not confirmed. The default leaves them on the queue."""
 
     lp: str = "review"
     collateral: str = "review"
+    stake: str = "review"
+
+
+@dataclass
+class OfficialContract:
+    """One official token contract. Extra names are labels, not a pool merge."""
+
+    asset: str
+    address: str
+    chain: str = ""
+    names: Tuple[str, ...] = ()
 
 
 @dataclass
@@ -132,6 +145,10 @@ class WalletRegistry:  # pylint: disable=too-many-instance-attributes
     match: MatchSettings = field(default_factory=MatchSettings)
     spam_symbols: List[str] = field(default_factory=list)
     spam_patterns: List[str] = field(default_factory=list)
+    official_contracts: List[OfficialContract] = field(default_factory=list)
+    poison_addresses: List[AddressRule] = field(default_factory=list)
+    lp_symbols: Tuple[str, ...] = ()
+    lp_patterns: Tuple[str, ...] = ()
     venues: List[AddressRule] = field(default_factory=list)
     contracts: List[AddressRule] = field(default_factory=list)
     bridges: BridgeRules = field(default_factory=BridgeRules)
@@ -150,6 +167,9 @@ _TOP_LEVEL = {
     "match",
     "token_groups",
     "spam",
+    "official_contracts",
+    "poison_addresses",
+    "lp_tokens",
     "venues",
     "contracts",
     "bridges",
@@ -162,7 +182,7 @@ _TOP_LEVEL = {
     "review_exceptions",
     "asset_names",
 }
-_ADDRESS_CATEGORIES = {"transfer-to-venue", "swap", "lp", "collateral", "bridge"}
+_ADDRESS_CATEGORIES = {"transfer-to-venue", "swap", "lp", "collateral", "stake", "bridge"}
 _UTILITY_TREATMENTS = {"income", "dust", "ignore"}
 _TAX_TREATMENTS = {"review", "transfer", "disposal"}
 _ENTRY_KEYS = {
@@ -182,6 +202,7 @@ _MATCH_KEYS = {
     "amount_tolerance",
     "amount_tolerance_abs",
     "share_pools",
+    "same_wallet_swaps",
     "fuzzy_window_hours",
     "cex_window_hours",
     "bridge_window_hours",
@@ -208,12 +229,17 @@ def load_wallet_registry(path: str) -> WalletRegistry:
         raise WalletRegistryError(f"Wallet registry has unknown keys: {names}")
 
     spam_symbols, spam_patterns = _load_spam(loaded.get("spam"))
+    lp_symbols, lp_patterns = _load_lp_tokens(loaded.get("lp_tokens"))
     registry = WalletRegistry(
         own=_load_entries(loaded.get("own"), "own"),
         payees=_load_entries(loaded.get("payees"), "payees"),
         match=_load_match(loaded.get("match")),
         spam_symbols=spam_symbols,
         spam_patterns=spam_patterns,
+        official_contracts=_load_official_contracts(loaded.get("official_contracts")),
+        poison_addresses=_load_poison_addresses(loaded.get("poison_addresses")),
+        lp_symbols=lp_symbols,
+        lp_patterns=lp_patterns,
     )
     if "token_groups" in loaded:
         registry.match.token_groups = _load_token_groups(loaded.get("token_groups"))
@@ -392,6 +418,8 @@ def _load_match(value: object) -> MatchSettings:
         )
     if "share_pools" in item:
         settings.share_pools = _parse_bool(item["share_pools"], "share_pools")
+    if "same_wallet_swaps" in item:
+        settings.same_wallet_swaps = _parse_bool(item["same_wallet_swaps"], "same_wallet_swaps")
     if "fuzzy_window_hours" in item:
         settings.fuzzy_window = _window_from_hours(item["fuzzy_window_hours"], "fuzzy_window_hours")
     if "cex_window_hours" in item:
@@ -458,6 +486,78 @@ def _load_spam(value: object) -> Tuple[List[str], List[str]]:
     return _string_list(item.get("symbols"), "spam.symbols"), _pattern_list(
         item.get("patterns"), "spam.patterns"
     )
+
+
+def _load_official_contracts(value: object) -> List[OfficialContract]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise WalletRegistryError("official_contracts must be a list")
+    return [
+        _load_official_contract(item, f"official_contracts[{index}]")
+        for index, item in enumerate(value, start=1)
+    ]
+
+
+def _load_official_contract(value: object, where: str) -> OfficialContract:
+    item = _require_mapping(value, where)
+    unknown = set(item) - {"asset", "chain", "address", "names"}
+    if unknown:
+        names = ", ".join(sorted(str(name) for name in unknown))
+        raise WalletRegistryError(f"{where} has unknown keys: {names}")
+    asset = _optional_str(item, "asset", where).upper()
+    address = _optional_str(item, "address", where)
+    if not asset or not address:
+        raise WalletRegistryError(f"{where} needs an asset and an address")
+    extra = _string_list(item.get("names"), f"{where}.names") if "names" in item else []
+    return OfficialContract(
+        asset=asset,
+        address=address,
+        chain=_optional_str(item, "chain", where),
+        names=tuple(extra),
+    )
+
+
+def _load_poison_addresses(value: object) -> List[AddressRule]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise WalletRegistryError("poison_addresses must be a list")
+    rules = []
+    for index, raw in enumerate(value, start=1):
+        where = f"poison_addresses[{index}]"
+        item = _require_mapping(raw, where)
+        unknown = set(item) - {"label", "address", "chain"}
+        if unknown:
+            names = ", ".join(sorted(str(name) for name in unknown))
+            raise WalletRegistryError(f"{where} has unknown keys: {names}")
+        address = _optional_str(item, "address", where)
+        if not address:
+            raise WalletRegistryError(f"{where} needs an address")
+        rules.append(
+            AddressRule(
+                label=_optional_str(item, "label", where) or address,
+                address=address,
+                category="poison",
+                chain=_optional_str(item, "chain", where),
+            )
+        )
+    return rules
+
+
+def _load_lp_tokens(value: object) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+    if value is None:
+        return (), ()
+    item = _require_mapping(value, "lp_tokens")
+    unknown = set(item) - {"symbols", "patterns"}
+    if unknown:
+        names = ", ".join(sorted(str(name) for name in unknown))
+        raise WalletRegistryError(f"lp_tokens has unknown keys: {names}")
+    symbols = tuple(
+        symbol.upper() for symbol in _string_list(item.get("symbols"), "lp_tokens.symbols")
+    )
+    patterns = tuple(_pattern_list(item.get("patterns"), "lp_tokens.patterns"))
+    return symbols, patterns
 
 
 def _pattern_list(value: object, name: str) -> List[str]:
@@ -624,7 +724,7 @@ def _load_margin(value: object) -> MarginRules:
 
 def _load_tax_treatment(value: object) -> TaxTreatment:
     item = _require_mapping(value, "tax_treatment")
-    unknown = set(item) - {"lp", "collateral"}
+    unknown = set(item) - {"lp", "collateral", "stake"}
     if unknown:
         names = ", ".join(sorted(str(name) for name in unknown))
         raise WalletRegistryError(f"tax_treatment has unknown keys: {names}")
@@ -633,6 +733,8 @@ def _load_tax_treatment(value: object) -> TaxTreatment:
         treatment.lp = _treatment_value(item["lp"], "tax_treatment.lp")
     if "collateral" in item:
         treatment.collateral = _treatment_value(item["collateral"], "tax_treatment.collateral")
+    if "stake" in item:
+        treatment.stake = _treatment_value(item["stake"], "tax_treatment.stake")
     return treatment
 
 

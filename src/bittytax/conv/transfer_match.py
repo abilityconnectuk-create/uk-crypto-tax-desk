@@ -132,6 +132,7 @@ def reconcile_transfers(
         pair_by_hash,
         pair_cex_chain,
         pair_fuzzy,
+        pair_same_wallet_swaps,
         pair_swaps,
     )
 
@@ -141,6 +142,7 @@ def reconcile_transfers(
     pair_cex_chain(legs, registry, result)
     pair_bridges(legs, registry, result)
     pair_swaps(legs, registry, result)
+    pair_same_wallet_swaps(legs, registry, result)
     _pair(legs, registry.match, result)
     pair_fuzzy(legs, registry, result)
     flag_unresolved(legs, registry, result)
@@ -876,6 +878,8 @@ def _share_pools(
     if not homes and isinstance(rows, list):
         homes = [rows]
     for row in list(rows):
+        if row.t_record is not None and str(row.t_record.t_type) == POSSIBLE_SPAM_TYPE:
+            continue
         if _mark_liquid_trade(row, settings):
             result.summary.append(
                 _summary(
@@ -974,6 +978,8 @@ def _mark_liquid_trade(row: DataRow, settings: MatchSettings) -> bool:
 
 def _rename_record(row: DataRow, settings: MatchSettings) -> None:
     if row.t_record is None:
+        return
+    if str(row.t_record.t_type) == POSSIBLE_SPAM_TYPE:
         return
     record = row.t_record
     if record.buy_asset:

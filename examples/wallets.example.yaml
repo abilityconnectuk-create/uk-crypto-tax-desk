@@ -42,6 +42,10 @@ match:
   # the group (a wrap or unwrap) becomes a transfer rather than a disposal.
   # HMRC has not said that wrapping is not a disposal.
   share_pools: false
+  # Off by default. When true, two legs on the same wallet that share a tx hash,
+  # name different assets, and have a blank destination become one trade.
+  # An LP or receipt token stays on the review queue.
+  same_wallet_swaps: false
 
 # Symbols that may be two sides of one internal move. The first symbol is the
 # shared pool name when match.share_pools is true. Otherwise symbols are not rewritten.
@@ -61,6 +65,23 @@ spam:
     - claim
     - "visit"
     - "airdrop claim"
+
+# Official token contracts. A row that uses the asset or one of its names, and
+# carries a different contract, is address-poisoning spam. The name is not merged
+# into the official pool. These addresses are fake.
+official_contracts:
+  - asset: USDT
+    chain: ethereum
+    address: "0x0000000000000000000000000000000000000a11"
+    names:
+      - Tether USD
+
+# Lookalike addresses used by address-poisoning. A source or destination match
+# is spam even when the ticker is an official asset.
+poison_addresses:
+  - label: Example lookalike
+    chain: ethereum
+    address: "0x0000000000000000000000000000000000000b0b"
 
 # Fake CEX deposit addresses. A send here is a transfer to the venue.
 venues:
@@ -83,6 +104,10 @@ contracts:
     chain: ethereum
     category: collateral
     address: "0x00000000000000000000000000000000000000d3"
+  - label: Example stake
+    chain: ethereum
+    category: stake
+    address: "0x00000000000000000000000000000000000000d4"
 
 bridges:
   patterns:
@@ -111,10 +136,19 @@ margin:
     - daily total
     - bot daily
 
-# LP and collateral are deliberately not hard-coded. review | transfer | disposal.
+# LP, collateral and stake are deliberately not hard-coded. review | transfer | disposal.
 tax_treatment:
   lp: review
   collateral: review
+  stake: review
+
+# Extra LP and receipt symbols. Built-in patterns already catch CAKE-LP, SLP,
+# BPT and UNI-V2. These add to that list; they do not replace it.
+lp_tokens:
+  symbols:
+    - UNI-V2
+  patterns:
+    - "-LP"
 
 official_assets:
   - USDT

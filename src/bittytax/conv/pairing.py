@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # Fork of BittyTax (AGPL-3.0). See LICENSE.
 
+import re
 from bisect import bisect_left, bisect_right
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -31,11 +32,21 @@ from .txref import (
     redact_account_numbers,
     related_official,
 )
-from .wallets import AddressRule, MatchSettings, WalletRegistry, find_entry
+from .wallets import AddressRule, MatchSettings, OfficialContract, WalletRegistry, find_entry
 
 _DEST_KEYS = ("TxDest", "Receiving Wallet", "To Wallet (read-only)")
 _SRC_KEYS = ("TxSrc", "Sending Wallet", "From Wallet (read-only)")
 _CHAIN_KEYS = ("Chain", "Blockchain", "Network")
+_CONTRACT_KEYS = (
+    "ContractAddress",
+    "TokenContractAddress",
+    "Token Contract",
+    "TokenContract",
+    "Contract",
+)
+_BUILTIN_LP_SYMBOLS = frozenset({"SLP", "BPT", "UNI-V2"})
+_BUILTIN_LP_PATTERNS = ("-lp", "lp-", "/lp", "_lp", "uni-v2", "receipt")
+_CONTRACT_IN_NAME = re.compile(r"\((0x[0-9a-fA-F]{8,})\)")
 _EXPLICIT_TAGS = {"gift", "lost", "donation", "cost"}
 _MARGIN_TYPES = (
     TrType.MARGIN_GAIN,
@@ -258,6 +269,36 @@ def pair_bridges(
             )
 
 
+def pair_same_wallet_swaps(
+    legs: Sequence[TransferLeg], registry: WalletRegistry, result: ReconcileResult
+) -> None:
+    """Pair a blank-destination swap on one wallet. Off unless the setting is on."""
+    if not registry.match.same_wallet_swaps:
+        return
+    incoming = [leg for leg in legs if leg.direction == "in" and leg.eligible and not leg.consumed]
+    index = LegIndex(incoming, registry.match)
+    for out in legs:
+        if out.direction != "out" or not out.eligible or out.consumed:
+            continue
+        if not _blank_destination(out.row):
+            continue
+        chosen = _closest(out, index.by_hash(out), registry, _same_wallet_swap_candidate)
+        if chosen is None:
+            continue
+        if _lp_looking(out, chosen, registry):
+            detail = "LP or receipt token left on review"
+            _flag(out, result, "lp-review", detail)
+            _flag(chosen, result, "lp-review", detail)
+            continue
+        _merge_exchange(
+            out,
+            chosen,
+            result,
+            "same-wallet-swap",
+            "same-hash swap on one wallet; destination blank",
+        )
+
+
 def pair_swaps(
     legs: Sequence[TransferLeg], registry: WalletRegistry, result: ReconcileResult
 ) -> None:
@@ -362,13 +403,19 @@ def _classify_fiat(row: DataRow, result: ReconcileResult) -> bool:
 
 def _classify_spam(row: DataRow, registry: WalletRegistry, result: ReconcileResult) -> bool:
     record = _record(row)
+    reason = _poison_reason(row, registry)
     assets = [asset for asset in (record.sell_asset, record.buy_asset) if asset]
+    if reason is None:
+        for asset in assets:
+            reason = _contract_spam_reason(row, asset, registry)
+            if reason:
+                break
+    if reason:
+        _mark_spam(row, result, reason)
+        return True
     for asset in assets:
         if _spam_asset(asset, registry) or _zero_lookalike(record, asset, registry):
-            record.t_type = UnmappedType(POSSIBLE_SPAM_TYPE)
-            _note(record, "possible spam")
-            _log(result, "possible-spam", row, _side(record), "lookalike or spam; not merged")
-            result.spam.append(_review(row, _side(record), "possible-spam"))
+            _mark_spam(row, result, "lookalike or spam; not merged")
             return True
         if is_confusable_official(asset, registry.match.official_assets):
             record.t_type = UnmappedType(NEEDS_REVIEW_TYPE)
@@ -387,6 +434,15 @@ def _classify_spam(row: DataRow, registry: WalletRegistry, result: ReconcileResu
     return False
 
 
+def _mark_spam(row: DataRow, result: ReconcileResult, reason: str) -> None:
+    """Drop the row. It is not a disposal, a transfer, or a wallet movement."""
+    record = _record(row)
+    record.t_type = UnmappedType(POSSIBLE_SPAM_TYPE)
+    _note(record, reason)
+    _log(result, "possible-spam", row, _side(record), reason)
+    result.spam.append(_review(row, _side(record), "possible-spam", reason))
+
+
 def _classify_contract(row: DataRow, registry: WalletRegistry, result: ReconcileResult) -> bool:
     record = _record(row)
     direction = _side(record)
@@ -403,9 +459,7 @@ def _classify_contract(row: DataRow, registry: WalletRegistry, result: Reconcile
         _log(result, "transfer-to-venue", row, direction, f"destination {rule.label}")
         return True
     kind = _position_kind(rule.category, direction)
-    treatment = (
-        registry.tax_treatment.lp if rule.category == "lp" else registry.tax_treatment.collateral
-    )
+    treatment = _treatment_for(rule.category, registry)
     _apply_treatment(row, direction, kind, treatment, rule.label, result)
     return True
 
@@ -528,6 +582,18 @@ def _bridge_candidate(out: TransferLeg, incoming: TransferLeg, registry: WalletR
         or hashes_equal(_tx_hash(out.row), _tx_hash(incoming.row))
         or _chains_differ(out.row, incoming.row)
     )
+
+
+def _same_wallet_swap_candidate(
+    out: TransferLeg, incoming: TransferLeg, registry: WalletRegistry
+) -> bool:
+    if not hashes_equal(_tx_hash(out.row), _tx_hash(incoming.row)):
+        return False
+    if not _same_wallet(out, incoming):
+        return False
+    if not _blank_destination(out.row) or not _blank_destination(incoming.row):
+        return False
+    return not assets_compatible(_asset(out.row, "out"), _asset(incoming.row, "in"), registry.match)
 
 
 def _swap_candidate(out: TransferLeg, incoming: TransferLeg, registry: WalletRegistry) -> bool:
@@ -722,6 +788,103 @@ def _names(label: str, account: str, address: str, wallet: str) -> bool:
     return folded in values
 
 
+def _poison_reason(row: DataRow, registry: WalletRegistry) -> Optional[str]:
+    if not registry.poison_addresses:
+        return None
+    chain = _chain(row)
+    for rule in registry.poison_addresses:
+        if rule.chain and chain and rule.chain.casefold() != chain.casefold():
+            continue
+        target = _norm(rule.address)
+        if any(_norm(candidate) == target for candidate in _dest_candidates(row)):
+            return f"address-poisoning: destination {rule.address} is a configured poison address"
+        if any(_norm(candidate) == target for candidate in _src_candidates(row)):
+            return f"address-poisoning: source {rule.address} is a configured poison address"
+    return None
+
+
+def _contract_spam_reason(row: DataRow, asset: str, registry: WalletRegistry) -> Optional[str]:
+    if not registry.official_contracts or not asset.strip():
+        return None
+    contract = _row_contract(row, asset)
+    if not contract:
+        return None
+    applicable = [rule for rule in registry.official_contracts if _name_matches(asset, rule)]
+    if not applicable:
+        return None
+    chain = _chain(row)
+    scoped = [
+        rule
+        for rule in applicable
+        if not rule.chain or not chain or rule.chain.casefold() == chain.casefold()
+    ]
+    if any(_norm_contract(rule.address) == _norm_contract(contract) for rule in scoped):
+        return None
+    chain_name = chain or "any chain"
+    symbol = applicable[0].asset
+    return (
+        f"address-poisoning: contract {contract} is not an official {chain_name} "
+        f"contract for {symbol}"
+    )
+
+
+def _name_matches(asset: str, rule: OfficialContract) -> bool:
+    names = {rule.asset.casefold()}
+    names.update(name.casefold() for name in rule.names)
+    folded = asset.strip().casefold()
+    prefix = folded.split("(", 1)[0].strip()
+    return bool(prefix) and (folded in names or prefix in names)
+
+
+def _row_contract(row: DataRow, asset: str) -> str:
+    for key in _CONTRACT_KEYS:
+        if key in row.row_dict and row.row_dict[key].strip():
+            return row.row_dict[key].strip()
+    found = _CONTRACT_IN_NAME.search(asset)
+    if found is None:
+        return ""
+    return found.group(1)
+
+
+def _norm_contract(value: str) -> str:
+    text = "".join(value.split()).casefold()
+    if text.startswith("0x"):
+        return text[2:]
+    return text
+
+
+def _same_wallet(out: TransferLeg, incoming: TransferLeg) -> bool:
+    left = _record(out.row).wallet.strip().casefold()
+    right = _record(incoming.row).wallet.strip().casefold()
+    return bool(left) and left == right
+
+
+def _blank_destination(row: DataRow) -> bool:
+    """True when TxDest is blank. The wallet column is not a destination."""
+    if row.tx_raw is not None:
+        return not _at(row, row.tx_raw.tx_dest_pos).strip()
+    if "TxDest" in row.row_dict:
+        return not row.row_dict["TxDest"].strip()
+    return not _dest_candidates(row)
+
+
+def _lp_looking(out: TransferLeg, incoming: TransferLeg, registry: WalletRegistry) -> bool:
+    return _lp_asset(_asset(out.row, "out"), registry) or _lp_asset(
+        _asset(incoming.row, "in"), registry
+    )
+
+
+def _lp_asset(asset: str, registry: WalletRegistry) -> bool:
+    symbol = asset.strip().upper()
+    if not symbol:
+        return False
+    if symbol in _BUILTIN_LP_SYMBOLS or symbol in {item.upper() for item in registry.lp_symbols}:
+        return True
+    folded = symbol.casefold()
+    patterns = _BUILTIN_LP_PATTERNS + tuple(registry.lp_patterns)
+    return any(pattern and pattern in folded for pattern in patterns)
+
+
 def _spam_asset(asset: str, registry: WalletRegistry) -> bool:
     symbol = asset.strip().upper()
     official = {item.upper() for item in registry.match.official_assets}
@@ -743,7 +906,17 @@ def _zero_lookalike(record: TransactionOutRecord, asset: str, registry: WalletRe
 def _position_kind(category: str, direction: str) -> str:
     if category == "lp":
         return "lp-add" if direction == "out" else "lp-remove"
+    if category == "stake":
+        return "stake-lock" if direction == "out" else "stake-return"
     return "collateral"
+
+
+def _treatment_for(category: str, registry: WalletRegistry) -> str:
+    if category == "lp":
+        return registry.tax_treatment.lp
+    if category == "stake":
+        return registry.tax_treatment.stake
+    return registry.tax_treatment.collateral
 
 
 def _as_transfer(record: TransactionOutRecord, direction: str) -> None:
@@ -816,7 +989,9 @@ def _log(
     )
 
 
-def _review(row: DataRow, direction: Optional[str], disposition: str) -> ReviewRow:
+def _review(
+    row: DataRow, direction: Optional[str], disposition: str, description: Optional[str] = None
+) -> ReviewRow:
     captured = _capture(row, direction or "out")
     return ReviewRow(
         timestamp=captured[0],
@@ -825,7 +1000,7 @@ def _review(row: DataRow, direction: Optional[str], disposition: str) -> ReviewR
         wallet=captured[3],
         destination=captured[4],
         tx_hash=captured[5],
-        description=_description(row),
+        description=_description(row) if description is None else description,
         disposition=disposition,
     )
 
