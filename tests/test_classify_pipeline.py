@@ -4,6 +4,7 @@ from decimal import Decimal
 from test_transfer_match import BASE, LEDGER, OTHER, PAYEE, _actions, _make, _payee, _registry, _run
 
 from bittytax.bt_types import TrType
+from bittytax.conv.datarow import DataRow
 from bittytax.conv.transfer_match import NEEDS_REVIEW_TYPE
 from bittytax.conv.txref import hashes_equal
 from bittytax.conv.wallets import AddressRule, BridgeRoute, ForcePair, LeaveUnmatched, RegistryEntry
@@ -273,7 +274,7 @@ def test_bridge_keeps_usdt_and_usdc_apart_and_a_token_change_is_an_exchange() ->
     assert "bridge-exchange" in _actions(swapped)
 
 
-def _without_chain(row):
+def _without_chain(row: DataRow) -> DataRow:
     row.row_dict.pop("Chain", None)
     return row
 
