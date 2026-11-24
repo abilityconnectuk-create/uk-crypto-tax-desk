@@ -9,6 +9,8 @@ The price data cache format has been updated to correctly distinguish assets tha
 The new `price_via_btc` config option may not exist in your config file. If it is missing, BittyTax keeps the legacy BTC-intermediate behaviour for backward compatibility. Add `price_via_btc: False` to your config if you want historic prices to use direct local currency lookups.
 
 ### Added
+- Conversion tool: `receipt_tokens` (default empty) books a venue deposit as an exchange when the same hash receives the receipt asset. A deposit with no receipt leg stays on review.
+- Conversion tool: a bridge with several in-legs takes the closest unused one whose amount fits. The same asset is preferred, so USDT stays separate from USDC. A token change is an exchange and the same asset is a transfer.
 - Conversion tool: `allocations` holds a stablecoin payment to a listed payee as a pending lot. The payment is an `Allocation` disposal at pool cost, not a spend or a trade. A short pool does not set the local value equal to that cost. `allocation_links` is manual and splits the pending value across named claim rows by quantity. A named refund from the payee reduces that lot. Unlinked lots are listed in `pending_allocations` and are not a loss or a negligible-value claim.
 - Conversion tool: `match.same_wallet_swap_wallets` and `match.same_wallet_swap_chains` limit same-wallet swaps to those wallets or chains when the switch is on.
 - Conversion tool: `official_contracts` and `poison_addresses` mark address-poisoning rows as spam. A ticker that names an official asset but uses another contract, or a row whose source or destination is a configured poison address, is dropped. It is not a disposal, a transfer, or a wallet movement, and it is not merged into the official pool. The possible-spam file records the reason.
@@ -16,6 +18,7 @@ The new `price_via_btc` config option may not exist in your config file. If it i
 - Conversion tool: `match.same_wallet_swaps` (default off) pairs same-hash, different-asset legs on one wallet with a blank destination into one logged trade. LP and receipt tokens stay on the review queue.
 
 ### Fixed
+- Conversion tool: `match.same_wallet_swaps` pairs a hash only when one wallet sends exactly one principal token and receives a different one. A hash on two of your own wallets is left for transfers. An out-only hash stays unmatched. The fee leg's local value is added to the acquired token's cost.
 - Conversion tool: a same-wallet swap no longer fails after the pair is merged. The fee check skips a consumed leg, including one whose record was cleared, so a 0.004 fee beside a 1,000 USDT to 458 sSUI swap still writes the output.
 - Conversion tool: `match.same_wallet_swaps` no longer picks a dust or fee leg, such as 0.004 of a gas token, just because the token-count gap is smaller. The large withdrawal stays the swap.
 - Reconciliation: a holdings summary row named Total, Totals, Grand Total or Subtotal is not compared as an asset.

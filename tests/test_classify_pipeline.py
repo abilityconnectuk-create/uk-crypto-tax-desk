@@ -162,6 +162,113 @@ def test_same_token_bridge_is_a_transfer_and_a_different_token_is_an_exchange() 
     assert "bridge-exchange" in _actions(swapped)
 
 
+def test_bridge_takes_the_closest_unused_in_leg_with_a_compatible_amount() -> None:
+    sent = _make(TrType.GIFT_SENT, BASE, "USDC", "1000", "Exchange", chain="ethereum")
+    too_small = _make(
+        TrType.GIFT_RECEIVED,
+        BASE + timedelta(minutes=10),
+        "USDC",
+        "100",
+        "Ledger",
+        chain="arbitrum",
+    )
+    close = _make(
+        TrType.GIFT_RECEIVED,
+        BASE + timedelta(hours=1),
+        "USDC",
+        "980",
+        "Ledger",
+        chain="arbitrum",
+    )
+    later = _make(
+        TrType.GIFT_RECEIVED,
+        BASE + timedelta(hours=10),
+        "USDC",
+        "1000",
+        "Ledger",
+        chain="arbitrum",
+    )
+    for row in (sent, too_small, close, later):
+        row.row_dict["Description"] = "bridge"
+    result = _run(sent, too_small, close, later)
+    assert sent.t_record is not None and sent.t_record.t_type is TrType.WITHDRAWAL
+    assert close.t_record is not None and close.t_record.t_type is TrType.DEPOSIT
+    assert too_small.t_record is not None and too_small.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert later.t_record is not None and later.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert "bridge-transfer" in _actions(result)
+
+
+def test_bridge_does_not_reuse_an_in_leg() -> None:
+    first = _make(TrType.GIFT_SENT, BASE, "USDT", "1000", "Exchange", chain="ethereum")
+    second = _make(
+        TrType.GIFT_SENT,
+        BASE + timedelta(minutes=1),
+        "USDT",
+        "1000",
+        "Exchange",
+        chain="ethereum",
+    )
+    incoming = _make(
+        TrType.GIFT_RECEIVED,
+        BASE + timedelta(minutes=30),
+        "USDT",
+        "1000",
+        "Ledger",
+        chain="arbitrum",
+    )
+    for row in (first, second, incoming):
+        row.row_dict["Description"] = "bridge"
+    result = _run(first, second, incoming)
+    assert first.t_record is not None and first.t_record.t_type is TrType.WITHDRAWAL
+    assert incoming.t_record is not None and incoming.t_record.t_type is TrType.DEPOSIT
+    assert second.t_record is not None and second.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert _actions(result).count("bridge-transfer") == 1
+
+
+def test_bridge_keeps_usdt_and_usdc_apart_and_a_token_change_is_an_exchange() -> None:
+    sent = _make(TrType.GIFT_SENT, BASE, "USDC", "1000", "Exchange", chain="ethereum")
+    other = _make(
+        TrType.GIFT_RECEIVED,
+        BASE + timedelta(minutes=20),
+        "USDT",
+        "1000",
+        "Ledger",
+        chain="arbitrum",
+    )
+    same = _make(
+        TrType.GIFT_RECEIVED,
+        BASE + timedelta(hours=2),
+        "USDC",
+        "1000",
+        "Ledger",
+        chain="arbitrum",
+    )
+    for row in (sent, other, same):
+        row.row_dict["Description"] = "bridge"
+    result = _run(sent, other, same)
+    assert sent.t_record is not None and sent.t_record.t_type is TrType.WITHDRAWAL
+    assert same.t_record is not None and same.t_record.t_type is TrType.DEPOSIT
+    assert other.t_record is not None and other.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert "bridge-transfer" in _actions(result)
+    assert "bridge-exchange" not in _actions(result)
+
+    changed = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Exchange", chain="ethereum")
+    bought = _make(
+        TrType.GIFT_RECEIVED,
+        BASE + timedelta(hours=1),
+        "USDC",
+        "1",
+        "Ledger",
+        chain="arbitrum",
+    )
+    changed.row_dict["Description"] = "bridge out"
+    bought.row_dict["Description"] = "bridge in"
+    swapped = _run(changed, bought)
+    assert changed.t_record is not None and changed.t_record.t_type is TrType.TRADE
+    assert changed.t_record.buy_asset == "USDC"
+    assert "bridge-exchange" in _actions(swapped)
+
+
 def test_payee_stays_a_disposal() -> None:
     sent = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Exchange", destination=PAYEE)
     result = _run(sent, registry=_registry(payees=[_payee()]))

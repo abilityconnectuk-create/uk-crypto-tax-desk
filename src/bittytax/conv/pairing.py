@@ -32,7 +32,14 @@ from .txref import (
     redact_account_numbers,
     related_official,
 )
-from .wallets import AddressRule, MatchSettings, OfficialContract, WalletRegistry, find_entry
+from .wallets import (
+    AddressRule,
+    MatchSettings,
+    OfficialContract,
+    ReceiptTokenRule,
+    WalletRegistry,
+    find_entry,
+)
 
 _DEST_KEYS = ("TxDest", "Receiving Wallet", "To Wallet (read-only)")
 _SRC_KEYS = ("TxSrc", "Sending Wallet", "From Wallet (read-only)")
@@ -248,8 +255,8 @@ def pair_bridges(
             continue
         if not _bridge_evidence(out.row, registry):
             continue
-        chosen = _closest(
-            out, index.time_window(out, registry.match.bridge_window), registry, _bridge_candidate
+        chosen = _closest_bridge_in(
+            out, index.time_window(out, registry.match.bridge_window), registry
         )
         if chosen is None:
             continue
@@ -275,44 +282,50 @@ def pair_bridges(
 def pair_same_wallet_swaps(
     legs: Sequence[TransferLeg], registry: WalletRegistry, result: ReconcileResult
 ) -> None:
-    """Pair a blank-destination swap on one wallet. Off unless the setting is on.
+    """One principal out and a different principal in. Off unless the setting is on.
 
-    A dust or fee leg is ignored. The match prefers a similar local value, so a
-    fee of 0.004 cannot win just because its token count is closer.
+    Fee and dust legs are not principals. A hash that names two of your own
+    wallets is left for transfer handling. An out with no principal in stays
+    unmatched. The fee's local value is added to the acquired cost.
     """
     if not registry.match.same_wallet_swaps:
         return
-    incoming = [leg for leg in legs if leg.direction == "in" and leg.eligible and not leg.consumed]
-    index = LegIndex(incoming, registry.match)
-    # Fee and dust are judged before any merge. Merging drops the received
-    # record, and a later fee check must not read that leg.
-    pending: List[TransferLeg] = []
-    for out in legs:
-        if out.direction != "out" or not out.eligible or out.consumed:
+    grouped: Dict[str, List[TransferLeg]] = {}
+    for leg in legs:
+        if not leg.eligible or not _leg_readable(leg):
             continue
-        if not _blank_destination(out.row) or not _swap_in_scope(out.row, registry):
+        digest = normalise_tx_hash(_tx_hash(leg.row))
+        if not digest:
             continue
-        if _dust_or_fee(out, legs):
+        grouped.setdefault(digest, []).append(leg)
+    for group in grouped.values():
+        if _several_own_wallets(group, registry):
             continue
-        pending.append(out)
-    for out in pending:
-        if out.consumed:
-            continue
-        chosen = _best_same_wallet_in(out, index.by_hash(out), legs, registry)
-        if chosen is None:
-            continue
-        if _lp_looking(out, chosen, registry):
-            detail = "LP or receipt token left on review"
-            _flag(out, result, "lp-review", detail)
-            _flag(chosen, result, "lp-review", detail)
-            continue
-        _merge_exchange(
-            out,
-            chosen,
-            result,
-            "same-wallet-swap",
-            "same-hash swap on one wallet; destination blank",
+        _pair_wallet_group(
+            [leg for leg in group if _swap_in_scope(leg.row, registry)], legs, registry, result
         )
+
+
+def pair_receipt_tokens(
+    legs: Sequence[TransferLeg], registry: WalletRegistry, result: ReconcileResult
+) -> None:
+    """A listed venue deposit with a same-hash receipt in-leg is one exchange.
+
+    The list is empty unless you set it. A deposit with no receipt leg stays
+    on review.
+    """
+    rules = registry.receipt_tokens
+    if not rules:
+        return
+    grouped: Dict[str, List[TransferLeg]] = {}
+    for leg in legs:
+        if not leg.eligible or not _leg_readable(leg):
+            continue
+        digest = normalise_tx_hash(_tx_hash(leg.row))
+        if digest:
+            grouped.setdefault(digest, []).append(leg)
+    for group in grouped.values():
+        _apply_receipt_rules(group, rules, result)
 
 
 def pair_swaps(
@@ -600,34 +613,122 @@ def _bridge_candidate(out: TransferLeg, incoming: TransferLeg, registry: WalletR
     )
 
 
-def _best_same_wallet_in(
-    out: TransferLeg,
-    incoming: Sequence[TransferLeg],
+def _closest_bridge_in(
+    out: TransferLeg, incoming: Sequence[TransferLeg], registry: WalletRegistry
+) -> Optional[TransferLeg]:
+    """Closest unused in-leg whose amount fits. The same asset is preferred.
+
+    A later exact amount does not beat a nearer compatible one. A different
+    asset does not win when a same-asset leg also fits.
+    """
+    same: List[TransferLeg] = []
+    changed: List[TransferLeg] = []
+    for leg in incoming:
+        if leg.consumed or leg.row is out.row or not _bridge_candidate(out, leg, registry):
+            continue
+        if not amounts_match(out.row, leg.row, registry.match):
+            continue
+        if assets_compatible(_asset(out.row, "out"), _asset(leg.row, "in"), registry.match):
+            same.append(leg)
+        else:
+            changed.append(leg)
+    pool = same or changed
+    if not pool:
+        return None
+    return min(pool, key=_gap_from(out))
+
+
+def _gap_from(out: TransferLeg) -> Callable[[TransferLeg], timedelta]:
+    def _measure(incoming: TransferLeg) -> timedelta:
+        return _gap(out, incoming)
+
+    return _measure
+
+
+def _pair_wallet_group(
+    group: Sequence[TransferLeg],
     legs: Sequence[TransferLeg],
     registry: WalletRegistry,
-) -> Optional[TransferLeg]:
-    chosen: Optional[TransferLeg] = None
-    chosen_key: Optional[Tuple[Decimal, timedelta]] = None
-    for leg in incoming:
-        if leg.consumed or leg.row is out.row:
-            continue
-        if not _same_wallet_swap_candidate(out, leg, registry):
-            continue
-        if not _swap_in_scope(leg.row, registry) or _dust_or_fee(leg, legs):
-            continue
-        key = _swap_rank(out, leg)
-        if chosen_key is None or key < chosen_key:
-            chosen = leg
-            chosen_key = key
-    return chosen
+    result: ReconcileResult,
+) -> None:
+    by_wallet: Dict[str, List[TransferLeg]] = {}
+    for leg in group:
+        name = _record(leg.row).wallet.strip().casefold()
+        if name:
+            by_wallet.setdefault(name, []).append(leg)
+    for wallet_legs in by_wallet.values():
+        _pair_one_wallet(wallet_legs, legs, registry, result)
 
 
-def _swap_rank(out: TransferLeg, incoming: TransferLeg) -> Tuple[Decimal, timedelta]:
-    out_value = _leg_value(out)
-    in_value = _leg_value(incoming)
-    if out_value is not None and in_value is not None and out_value > 0:
-        return (abs(out_value - in_value) / out_value, _gap(out, incoming))
-    return (-_leg_quantity(incoming), _gap(out, incoming))
+def _pair_one_wallet(
+    wallet_legs: Sequence[TransferLeg],
+    legs: Sequence[TransferLeg],
+    registry: WalletRegistry,
+    result: ReconcileResult,
+) -> None:
+    # Judge fee and dust before the merge. The merge clears the received record.
+    principals = [leg for leg in wallet_legs if not _dust_or_fee(leg, legs)]
+    outs = [leg for leg in principals if leg.direction == "out"]
+    incoming = [leg for leg in principals if leg.direction == "in"]
+    if len(outs) != 1 or len(incoming) != 1:
+        return
+    out, received = outs[0], incoming[0]
+    if assets_compatible(_asset(out.row, "out"), _asset(received.row, "in"), registry.match):
+        return
+    if _lp_looking(out, received, registry):
+        detail = "LP or receipt token left on review"
+        _flag(out, result, "lp-review", detail)
+        _flag(received, result, "lp-review", detail)
+        return
+    _merge_exchange(out, received, result, "same-wallet-swap", _swap_detail(out))
+    fees = [leg for leg in wallet_legs if leg not in principals]
+    _fold_fee_into_cost(out, fees)
+
+
+def _swap_detail(out: TransferLeg) -> str:
+    if _blank_destination(out.row):
+        return "same-hash swap on one wallet; destination blank"
+    return "same-hash swap on one wallet"
+
+
+def _fold_fee_into_cost(out: TransferLeg, fees: Sequence[TransferLeg]) -> None:
+    """Acquired cost is the outgoing local value plus each fee leg's local value."""
+    record = _record(out.row)
+    extra = Decimal(0)
+    for leg in fees:
+        if not _leg_readable(leg):
+            continue
+        value = _leg_value(leg)
+        if value is not None:
+            extra += value
+        leg.row.t_record = None
+        leg.consumed = True
+    if record.sell_value is not None:
+        record.buy_value = record.sell_value + extra
+    elif extra and record.buy_value is not None:
+        record.buy_value = record.buy_value + extra
+    elif extra:
+        record.buy_value = extra
+    if extra:
+        _note(record, "fee included in the acquired cost")
+
+
+def _several_own_wallets(group: Sequence[TransferLeg], registry: WalletRegistry) -> bool:
+    names = set()
+    for leg in group:
+        wallet = _record(leg.row).wallet.strip()
+        if wallet and _named_own_wallet(wallet, registry):
+            names.add(wallet.casefold())
+    return len(names) >= 2
+
+
+def _named_own_wallet(wallet: str, registry: WalletRegistry) -> bool:
+    folded = wallet.strip().casefold()
+    for entry in registry.own:
+        for name in (entry.label, entry.account, entry.wallet):
+            if name and name.strip().casefold() == folded:
+                return True
+    return False
 
 
 def _dust_or_fee(leg: TransferLeg, legs: Sequence[TransferLeg]) -> bool:
@@ -700,16 +801,62 @@ def _leg_value(leg: TransferLeg) -> Optional[Decimal]:
     return record.sell_value
 
 
-def _same_wallet_swap_candidate(
-    out: TransferLeg, incoming: TransferLeg, registry: WalletRegistry
-) -> bool:
-    if not hashes_equal(_tx_hash(out.row), _tx_hash(incoming.row)):
+def _apply_receipt_rules(
+    group: Sequence[TransferLeg], rules: Sequence[ReceiptTokenRule], result: ReconcileResult
+) -> None:
+    for out in group:
+        if out.direction != "out" or not _leg_readable(out):
+            continue
+        rule = _receipt_rule(out, rules)
+        if rule is None:
+            continue
+        incoming = _receipt_in(out, group, rule)
+        if incoming is None:
+            _flag(out, result, "receipt-missing", "deposit has no receipt-token in-leg")
+            continue
+        _merge_exchange(
+            out,
+            incoming,
+            result,
+            "receipt-exchange",
+            "deposit and receipt token on one hash",
+        )
+
+
+def _receipt_rule(
+    out: TransferLeg, rules: Sequence[ReceiptTokenRule]
+) -> Optional[ReceiptTokenRule]:
+    asset = _asset(out.row, "out").strip().casefold()
+    for rule in rules:
+        if rule.deposit.strip().casefold() != asset:
+            continue
+        if _venue_matches(out.row, rule.venue):
+            return rule
+    return None
+
+
+def _venue_matches(row: DataRow, venue: str) -> bool:
+    folded = venue.strip().casefold()
+    if not folded:
         return False
-    if not _same_wallet(out, incoming):
-        return False
-    if not _blank_destination(out.row) or not _blank_destination(incoming.row):
-        return False
-    return not assets_compatible(_asset(out.row, "out"), _asset(incoming.row, "in"), registry.match)
+    if _record(row).wallet.strip().casefold() == folded:
+        return True
+    return any(item.strip().casefold() == folded for item in _dest_candidates(row))
+
+
+def _receipt_in(
+    out: TransferLeg, group: Sequence[TransferLeg], rule: ReceiptTokenRule
+) -> Optional[TransferLeg]:
+    wanted = rule.receipt.strip().casefold()
+    digest = normalise_tx_hash(_tx_hash(out.row))
+    for leg in group:
+        if leg.direction != "in" or not _leg_readable(leg) or leg.row is out.row:
+            continue
+        if normalise_tx_hash(_tx_hash(leg.row)) != digest:
+            continue
+        if _asset(leg.row, "in").strip().casefold() == wanted:
+            return leg
+    return None
 
 
 def _swap_candidate(out: TransferLeg, incoming: TransferLeg, registry: WalletRegistry) -> bool:
@@ -967,12 +1114,6 @@ def _norm_contract(value: str) -> str:
     if text.startswith("0x"):
         return text[2:]
     return text
-
-
-def _same_wallet(out: TransferLeg, incoming: TransferLeg) -> bool:
-    left = _record(out.row).wallet.strip().casefold()
-    right = _record(incoming.row).wallet.strip().casefold()
-    return bool(left) and left == right
 
 
 def _blank_destination(row: DataRow) -> bool:

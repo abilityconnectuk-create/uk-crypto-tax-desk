@@ -62,7 +62,7 @@ class MatchSettings:  # pylint: disable=too-many-instance-attributes
     official_assets: Tuple[str, ...] = ("USDT", "BTC", "ETH")
     blocked_symbols: Tuple[str, ...] = ()
     blocked_patterns: Tuple[str, ...] = ()
-    # Off until the user opts in. A blank-destination exchange row is not a trade by itself.
+    # Off until the user opts in. One hash on one wallet is not a trade by itself.
     same_wallet_swaps: bool = False
     # Empty means every wallet. Compared after case folding.
     same_wallet_swap_wallets: Tuple[str, ...] = ()
@@ -150,6 +150,15 @@ class AllocationLink:
     claims: Tuple[str, ...]
 
 
+@dataclass
+class ReceiptTokenRule:
+    """A deposit of one asset at a venue that mints a receipt asset on the same hash."""
+
+    venue: str
+    deposit: str
+    receipt: str
+
+
 def _default_utilities() -> List[UtilityRule]:
     return [
         UtilityRule("launchpool", "income"),
@@ -193,6 +202,7 @@ class WalletRegistry:  # pylint: disable=too-many-instance-attributes
     asset_names: Optional[Dict[str, Tuple[str, ...]]] = None
     allocations: List[AllocationRule] = field(default_factory=list)
     allocation_links: List[AllocationLink] = field(default_factory=list)
+    receipt_tokens: List[ReceiptTokenRule] = field(default_factory=list)
 
 
 _TOP_LEVEL = {
@@ -217,6 +227,7 @@ _TOP_LEVEL = {
     "asset_names",
     "allocations",
     "allocation_links",
+    "receipt_tokens",
 }
 _ADDRESS_CATEGORIES = {"transfer-to-venue", "swap", "lp", "collateral", "stake", "bridge"}
 _UTILITY_TREATMENTS = {"income", "dust", "ignore"}
@@ -310,6 +321,8 @@ def load_wallet_registry(path: str) -> WalletRegistry:
         registry.allocations = _load_allocations(loaded.get("allocations"))
     if "allocation_links" in loaded:
         registry.allocation_links = _load_allocation_links(loaded.get("allocation_links"))
+    if "receipt_tokens" in loaded:
+        registry.receipt_tokens = _load_receipt_tokens(loaded.get("receipt_tokens"))
     return registry
 
 
@@ -942,3 +955,27 @@ def _load_allocation_links(value: object) -> List[AllocationLink]:
             raise WalletRegistryError(f"{where} needs payments, an asset, and claims")
         links.append(AllocationLink(payments=payments, asset=asset, claims=claims))
     return links
+
+
+def _load_receipt_tokens(value: object) -> List[ReceiptTokenRule]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise WalletRegistryError("receipt_tokens must be a list")
+    rules = []
+    for index, raw in enumerate(value, start=1):
+        where = f"receipt_tokens[{index}]"
+        item = _require_mapping(raw, where)
+        unknown = set(item) - {"venue", "deposit", "receipt"}
+        if unknown:
+            names = ", ".join(sorted(str(name) for name in unknown))
+            raise WalletRegistryError(f"{where} has unknown keys: {names}")
+        venue = _optional_str(item, "venue", where)
+        deposit = _optional_str(item, "deposit", where)
+        receipt = _optional_str(item, "receipt", where)
+        if not venue or not deposit or not receipt:
+            raise WalletRegistryError(
+                f"{where} needs a venue, a deposit asset, and a receipt asset"
+            )
+        rules.append(ReceiptTokenRule(venue=venue, deposit=deposit, receipt=receipt))
+    return rules

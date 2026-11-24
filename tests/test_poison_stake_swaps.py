@@ -7,7 +7,14 @@ from test_transfer_match import BASE, _actions, _make, _registry, _run
 
 from bittytax.bt_types import TrType
 from bittytax.conv.transfer_match import NEEDS_REVIEW_TYPE, write_reconciliation_reports
-from bittytax.conv.wallets import AddressRule, OfficialContract, TokenGroup
+from bittytax.conv.wallets import (
+    AddressRule,
+    OfficialContract,
+    ReceiptTokenRule,
+    RegistryEntry,
+    TokenGroup,
+    WalletRegistry,
+)
 from bittytax.import_records import ImportRecords
 from bittytax.t_row import TransactionRow
 
@@ -16,6 +23,7 @@ FAKE = "0x0000000000000000000000000000000000000a22"
 POISON = "0x0000000000000000000000000000000000000b0b"
 STAKE = "0x00000000000000000000000000000000000000d4"
 SWAP_HASH = "0x" + "cd" * 16
+VENUE = "0x" + "e1" * 20
 
 
 def _usdt_rules() -> List[OfficialContract]:
@@ -176,7 +184,7 @@ def test_same_wallet_swap_ignores_a_fee_leg() -> None:
     assert large.t_record.buy_asset == "ETH"
     assert large.t_record.buy_quantity == Decimal("3.5")
     assert received.t_record is None
-    assert fee.t_record is not None and fee.t_record.t_type is not TrType.TRADE
+    assert fee.t_record is None
 
     other_hash = "0x" + "ef" * 16
     sent = _make(TrType.GIFT_SENT, BASE, "ETH", "5", "Ledger", tx_hash=other_hash)
@@ -187,7 +195,7 @@ def test_same_wallet_swap_ignores_a_fee_leg() -> None:
     assert sent.t_record.buy_asset == "USDC"
     assert sent.t_record.buy_quantity == Decimal("8000")
     assert bought.t_record is None
-    assert dust.t_record is not None and dust.t_record.t_type is not TrType.TRADE
+    assert dust.t_record is None
 
 
 def test_usdt_ssui_swap_does_not_read_the_cleared_receive_leg() -> None:
@@ -204,7 +212,7 @@ def test_usdt_ssui_swap_does_not_read_the_cleared_receive_leg() -> None:
     assert usdt.t_record.buy_asset == "sSUI"
     assert usdt.t_record.buy_quantity == Decimal("458")
     assert received.t_record is None
-    assert fee.t_record is not None and fee.t_record.t_type is not TrType.TRADE
+    assert fee.t_record is None
 
 
 def test_same_wallet_swaps_can_be_limited_to_a_wallet_or_chain() -> None:
@@ -241,3 +249,124 @@ def test_same_wallet_swaps_can_be_limited_to_a_wallet_or_chain() -> None:
     _run(kept, kept_in, other, other_in, registry=by_wallet)
     assert kept.t_record is not None and kept.t_record.t_type is TrType.TRADE
     assert other.t_record is not None and other.t_record.t_type is not TrType.TRADE
+
+
+def _swaps_on(*own: RegistryEntry) -> WalletRegistry:
+    registry = _registry(own=own)
+    registry.match.same_wallet_swaps = True
+    return registry
+
+
+def test_fee_value_is_added_to_the_acquired_token_cost() -> None:
+    registry = _swaps_on()
+    digest = "0x" + "71" * 16
+    out = _make(TrType.GIFT_SENT, BASE, "USDC", "625", "Ledger", tx_hash=digest, value="625")
+    fee = _make(
+        TrType.GIFT_SENT,
+        BASE,
+        "SOL",
+        "0.00326924",
+        "Ledger",
+        tx_hash=digest,
+        value="1.25",
+    )
+    incoming = _make(
+        TrType.GIFT_RECEIVED, BASE, "SERSH", "1250", "Ledger", tx_hash=digest, value="600"
+    )
+    _run(out, fee, incoming, registry=registry)
+    assert out.t_record is not None and out.t_record.t_type is TrType.TRADE
+    assert out.t_record.buy_asset == "SERSH"
+    assert out.t_record.buy_quantity == Decimal("1250")
+    assert out.t_record.buy_value == Decimal("626.25")
+    assert "fee included in the acquired cost" in out.t_record.note
+    assert fee.t_record is None
+    assert incoming.t_record is None
+
+
+def test_out_only_hash_stays_unmatched() -> None:
+    registry = _swaps_on()
+    digest = "0x" + "72" * 16
+    out = _make(TrType.GIFT_SENT, BASE, "USDC", "625", "Ledger", tx_hash=digest, value="625")
+    fee = _make(TrType.GIFT_SENT, BASE, "SOL", "0.00326924", "Ledger", tx_hash=digest, value="1.25")
+    result = _run(out, fee, registry=registry)
+    assert "same-wallet-swap" not in _actions(result)
+    assert out.t_record is not None and out.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert fee.t_record is not None and fee.t_record.t_type == NEEDS_REVIEW_TYPE
+
+
+def test_two_principal_legs_on_one_side_are_not_a_swap() -> None:
+    registry = _swaps_on()
+    digest = "0x" + "73" * 16
+    first = _make(TrType.GIFT_SENT, BASE, "USDC", "625", "Ledger", tx_hash=digest)
+    second = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Ledger", tx_hash=digest)
+    incoming = _make(TrType.GIFT_RECEIVED, BASE, "SERSH", "1250", "Ledger", tx_hash=digest)
+    outs = _run(first, second, incoming, registry=registry)
+    assert "same-wallet-swap" not in _actions(outs)
+    assert first.t_record is not None and first.t_record.t_type == NEEDS_REVIEW_TYPE
+
+    other = "0x" + "75" * 16
+    sent = _make(TrType.GIFT_SENT, BASE, "USDC", "625", "Ledger", tx_hash=other)
+    alpha = _make(TrType.GIFT_RECEIVED, BASE, "SERSH", "1250", "Ledger", tx_hash=other)
+    beta = _make(TrType.GIFT_RECEIVED, BASE, "ETH", "2", "Ledger", tx_hash=other)
+    ins = _run(sent, alpha, beta, registry=registry)
+    assert "same-wallet-swap" not in _actions(ins)
+    assert sent.t_record is not None and sent.t_record.t_type == NEEDS_REVIEW_TYPE
+
+    same = "0x" + "76" * 16
+    sold = _make(TrType.GIFT_SENT, BASE, "USDC", "625", "Ledger", tx_hash=same)
+    bought = _make(TrType.GIFT_RECEIVED, BASE, "USDC", "625", "Ledger", tx_hash=same)
+    held = _run(sold, bought, registry=registry)
+    assert "same-wallet-swap" not in _actions(held)
+    assert sold.t_record is not None and sold.t_record.t_type == NEEDS_REVIEW_TYPE
+
+
+def test_hash_on_two_own_wallets_is_not_a_swap() -> None:
+    registry = _swaps_on(
+        RegistryEntry(label="Ledger", account="Ledger"),
+        RegistryEntry(label="Cold", account="Cold"),
+    )
+    digest = "0x" + "74" * 16
+    out = _make(TrType.GIFT_SENT, BASE, "USDC", "625", "Ledger", tx_hash=digest)
+    incoming = _make(TrType.GIFT_RECEIVED, BASE, "SERSH", "1250", "Ledger", tx_hash=digest)
+    other = _make(TrType.GIFT_RECEIVED, BASE, "ETH", "1", "Cold", tx_hash=digest)
+    result = _run(out, incoming, other, registry=registry)
+    assert "same-wallet-swap" not in _actions(result)
+    assert out.t_record is not None and out.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert incoming.t_record is not None and incoming.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert other.t_record is not None and other.t_record.t_type == NEEDS_REVIEW_TYPE
+
+
+def test_receipt_token_exchange_needs_the_receipt_leg_and_is_off_by_default() -> None:
+    registry = _registry()
+    registry.receipt_tokens = [ReceiptTokenRule(venue=VENUE, deposit="USDC", receipt="Z0USDC")]
+    digest = "0x" + "91" * 16
+    out = _make(TrType.GIFT_SENT, BASE, "USDC", "100", "Ledger", destination=VENUE, tx_hash=digest)
+    incoming = _make(TrType.GIFT_RECEIVED, BASE, "Z0USDC", "100", "Ledger", tx_hash=digest)
+    booked = _run(out, incoming, registry=registry)
+    assert out.t_record is not None and out.t_record.t_type is TrType.TRADE
+    assert out.t_record.buy_asset == "Z0USDC"
+    assert out.t_record.buy_quantity == Decimal("100")
+    assert incoming.t_record is None
+    assert "receipt-exchange" in _actions(booked)
+
+    lone = _make(
+        TrType.GIFT_SENT,
+        BASE,
+        "USDC",
+        "100",
+        "Ledger",
+        destination=VENUE,
+        tx_hash="0x" + "92" * 16,
+    )
+    reviewed = _run(lone, registry=registry)
+    assert lone.t_record is not None and lone.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert lone.t_record.t_type is not TrType.TRADE
+    assert "receipt-missing" in _actions(reviewed)
+
+    plain_out = _make(
+        TrType.GIFT_SENT, BASE, "USDC", "100", "Ledger", destination=VENUE, tx_hash=digest
+    )
+    plain_in = _make(TrType.GIFT_RECEIVED, BASE, "Z0USDC", "100", "Ledger", tx_hash=digest)
+    held = _run(plain_out, plain_in)
+    assert "receipt-exchange" not in _actions(held)
+    assert plain_out.t_record is not None and plain_out.t_record.t_type == NEEDS_REVIEW_TYPE

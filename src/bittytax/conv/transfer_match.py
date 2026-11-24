@@ -104,6 +104,7 @@ def reconcile_transfers(
         pair_by_hash,
         pair_cex_chain,
         pair_fuzzy,
+        pair_receipt_tokens,
         pair_same_wallet_swaps,
         pair_swaps,
     )
@@ -115,6 +116,7 @@ def reconcile_transfers(
     pair_cex_chain(legs, registry, result)
     pair_bridges(legs, registry, result)
     pair_swaps(legs, registry, result)
+    pair_receipt_tokens(legs, registry, result)
     pair_same_wallet_swaps(legs, registry, result)
     _pair(legs, registry.match, result)
     pair_fuzzy(legs, registry, result)

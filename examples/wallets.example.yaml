@@ -42,10 +42,11 @@ match:
   # the group (a wrap or unwrap) becomes a transfer rather than a disposal.
   # HMRC has not said that wrapping is not a disposal.
   share_pools: false
-  # Off by default. When true, two legs on the same wallet that share a tx hash,
-  # name different assets, and have a blank destination become one trade.
-  # A dust or fee leg, such as 0.004 of the gas token, is not the swap.
-  # An LP or receipt token stays on the review queue.
+  # Off by default. When true, one hash on one wallet becomes a trade only when,
+  # after fee and dust legs are set aside, exactly one token goes out and a
+  # different token comes in. The fee's local value is added to the acquired cost.
+  # A hash that also names another wallet listed under own is left for transfers.
+  # An out with no principal in stays unmatched. An LP token stays on review.
   same_wallet_swaps: false
   # Used only when same_wallet_swaps is true. Empty means every wallet or chain.
   # A row has to match every list you set. These names are samples.
@@ -148,6 +149,14 @@ tax_treatment:
   lp: review
   collateral: review
   stake: review
+
+# Off unless listed. A deposit of `deposit` to `venue` (an address or a wallet
+# name) with a same-hash in-leg of `receipt` is one exchange. A deposit with no
+# receipt leg stays on review. The address below is fake.
+receipt_tokens:
+  - venue: "0x0000000000000000000000000000000000000e01"
+    deposit: USDC
+    receipt: Z0USDC
 
 # Extra LP and receipt symbols. Built-in patterns already catch CAKE-LP, SLP,
 # BPT and UNI-V2. These add to that list; they do not replace it.

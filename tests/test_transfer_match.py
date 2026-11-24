@@ -637,6 +637,9 @@ def test_example_registry_loads() -> None:
     assert registry.allocations[0].refunds[0].refund.endswith("bb")
     assert registry.allocation_links[0].asset == "WIDGET"
     assert len(registry.allocation_links[0].claims) == 2
+    assert registry.receipt_tokens[0].venue.endswith("0e01")
+    assert registry.receipt_tokens[0].deposit == "USDC"
+    assert registry.receipt_tokens[0].receipt == "Z0USDC"
     assert registry.official_contracts[0].asset == "USDT"
     assert registry.official_contracts[0].names == ("Tether USD",)
     assert registry.poison_addresses[0].address.endswith("0b0b")
