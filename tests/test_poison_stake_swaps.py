@@ -190,6 +190,23 @@ def test_same_wallet_swap_ignores_a_fee_leg() -> None:
     assert dust.t_record is not None and dust.t_record.t_type is not TrType.TRADE
 
 
+def test_usdt_ssui_swap_does_not_read_the_cleared_receive_leg() -> None:
+    registry = _registry()
+    registry.match.same_wallet_swaps = True
+    tx_hash = "0x" + "58" * 16
+    usdt = _make(TrType.GIFT_SENT, BASE, "USDT", "1000", "Ledger", tx_hash=tx_hash)
+    fee = _make(TrType.GIFT_SENT, BASE, "SUI", "0.004", "Ledger", tx_hash=tx_hash)
+    received = _make(TrType.GIFT_RECEIVED, BASE, "sSUI", "458", "Ledger", tx_hash=tx_hash)
+    _run(usdt, fee, received, registry=registry)
+    assert usdt.t_record is not None and usdt.t_record.t_type is TrType.TRADE
+    assert usdt.t_record.sell_asset == "USDT"
+    assert usdt.t_record.sell_quantity == Decimal("1000")
+    assert usdt.t_record.buy_asset == "sSUI"
+    assert usdt.t_record.buy_quantity == Decimal("458")
+    assert received.t_record is None
+    assert fee.t_record is not None and fee.t_record.t_type is not TrType.TRADE
+
+
 def test_same_wallet_swaps_can_be_limited_to_a_wallet_or_chain() -> None:
     sui_hash = "0x" + "11" * 16
     eth_hash = "0x" + "22" * 16

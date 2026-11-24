@@ -693,6 +693,79 @@ def test_koinly_tax_report_own_address_is_rewritten() -> None:
     assert result.summary[0].tx_hash == "0xparsed"
 
 
+def test_wallet_scoped_swap_runs_when_the_input_has_no_chain_column(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config.ccy = "GBP"
+    DataFile.data_files.clear()
+    DataFile.data_files_ordered.clear()
+    assert "Chain" not in _TAX_HEADER
+    try:
+        wallet_path = tmp_path / "wallets.yaml"
+        wallet_path.write_text(
+            "match:\n  same_wallet_swaps: true\n  same_wallet_swap_wallets:\n    - Ledger\n",
+            encoding="utf-8",
+        )
+        source = tmp_path / "koinly.csv"
+        ledger_hash = "0x" + "11" * 16
+        other_hash = "0x" + "22" * 16
+        with open(source, "w", encoding="utf-8", newline="") as handle:
+            writer = csv.writer(handle, lineterminator="\n")
+            writer.writerow(_TAX_HEADER)
+            writer.writerow(_tax_row("Ledger", "ETH", "1", ledger_hash, outgoing=True))
+            writer.writerow(_tax_row("Ledger", "USDC", "100", ledger_hash, outgoing=False))
+            writer.writerow(_tax_row("Cold", "ETH", "1", other_hash, outgoing=True))
+            writer.writerow(_tax_row("Cold", "USDC", "100", other_hash, outgoing=False))
+        output = tmp_path / "records.csv"
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "bittytax_conv",
+                str(source),
+                "--format",
+                "CSV",
+                "--wallets",
+                str(wallet_path),
+                "-o",
+                str(output),
+            ],
+        )
+        main()
+
+        assert output.is_file() and output.stat().st_size > 0
+        with open(output, encoding="utf-8", newline="") as handle:
+            records = list(csv.DictReader(handle))
+        trades = [row for row in records if row["Type"] == "Trade"]
+        assert len(trades) == 1
+        assert trades[0]["Wallet"] == "Ledger"
+        assert trades[0]["Sell Asset"] == "ETH"
+        assert trades[0]["Sell Quantity"] == "1"
+        assert trades[0]["Buy Asset"] == "USDC"
+        assert trades[0]["Buy Quantity"] == "100"
+        assert all(row["Type"] != "Trade" for row in records if row["Wallet"] == "Cold")
+    finally:
+        DataFile.data_files.clear()
+        DataFile.data_files_ordered.clear()
+
+
+def _tax_row(wallet: str, asset: str, quantity: str, tx_hash: str, outgoing: bool) -> List[str]:
+    values = {column: "" for column in _TAX_HEADER}
+    values["Date"] = "2024-06-01 12:00:00"
+    values["TxHash"] = tx_hash
+    if outgoing:
+        values["Type"] = "crypto_withdrawal"
+        values["Sending Wallet"] = wallet
+        values["Sent Amount"] = quantity
+        values["Sent Currency"] = asset
+    else:
+        values["Type"] = "crypto_deposit"
+        values["Receiving Wallet"] = wallet
+        values["Received Amount"] = quantity
+        values["Received Currency"] = asset
+    return [values[column] for column in _TAX_HEADER]
+
+
 def test_cli_writes_transfers_and_the_review_report(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

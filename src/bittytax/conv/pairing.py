@@ -284,12 +284,19 @@ def pair_same_wallet_swaps(
         return
     incoming = [leg for leg in legs if leg.direction == "in" and leg.eligible and not leg.consumed]
     index = LegIndex(incoming, registry.match)
+    # Fee and dust are judged before any merge. Merging drops the received
+    # record, and a later fee check must not read that leg.
+    pending: List[TransferLeg] = []
     for out in legs:
         if out.direction != "out" or not out.eligible or out.consumed:
             continue
         if not _blank_destination(out.row) or not _swap_in_scope(out.row, registry):
             continue
         if _dust_or_fee(out, legs):
+            continue
+        pending.append(out)
+    for out in pending:
+        if out.consumed:
             continue
         chosen = _best_same_wallet_in(out, index.by_hash(out), legs, registry)
         if chosen is None:
@@ -633,7 +640,7 @@ def _dust_or_fee(leg: TransferLeg, legs: Sequence[TransferLeg]) -> bool:
     asset = _asset(leg.row, leg.direction).strip().upper()
     value = _leg_value(leg)
     for other in _hash_siblings(leg, legs):
-        if other is leg:
+        if other is leg or not _leg_readable(other):
             continue
         other_qty = _leg_quantity(other)
         other_asset = _asset(other.row, other.direction).strip().upper()
@@ -655,8 +662,17 @@ def _dust_or_fee(leg: TransferLeg, legs: Sequence[TransferLeg]) -> bool:
 def _hash_siblings(leg: TransferLeg, legs: Sequence[TransferLeg]) -> List[TransferLeg]:
     digest = normalise_tx_hash(_tx_hash(leg.row))
     if not digest:
-        return [leg]
-    return [item for item in legs if normalise_tx_hash(_tx_hash(item.row)) == digest]
+        return [leg] if _leg_readable(leg) else []
+    return [
+        item
+        for item in legs
+        if _leg_readable(item) and normalise_tx_hash(_tx_hash(item.row)) == digest
+    ]
+
+
+def _leg_readable(leg: TransferLeg) -> bool:
+    """A merged receive has no record, and a consumed leg is not judged again."""
+    return not leg.consumed and leg.row.t_record is not None
 
 
 def _swap_in_scope(row: DataRow, registry: WalletRegistry) -> bool:

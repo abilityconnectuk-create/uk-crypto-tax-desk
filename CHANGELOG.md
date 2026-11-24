@@ -16,6 +16,7 @@ The new `price_via_btc` config option may not exist in your config file. If it i
 - Conversion tool: `match.same_wallet_swaps` (default off) pairs same-hash, different-asset legs on one wallet with a blank destination into one logged trade. LP and receipt tokens stay on the review queue.
 
 ### Fixed
+- Conversion tool: a same-wallet swap no longer fails after the pair is merged. The fee check skips a consumed leg, including one whose record was cleared, so a 0.004 fee beside a 1,000 USDT to 458 sSUI swap still writes the output.
 - Conversion tool: `match.same_wallet_swaps` no longer picks a dust or fee leg, such as 0.004 of a gas token, just because the token-count gap is smaller. The large withdrawal stays the swap.
 - Reconciliation: a holdings summary row named Total, Totals, Grand Total or Subtotal is not compared as an asset.
 - Reconciliation: pool cost compares the union of the Koinly costs and the engine pool, so an engine-only leftover pool fails P2.
