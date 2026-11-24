@@ -89,13 +89,16 @@ price_via_btc: False
 coinbase_zero_fees_are_gifts: False
 
 # How unmatched and unmapped rows are treated.
-# reject (default) skips them with a warning and does not abort the file.
-# market (recommended) acquires deposits at market value (Review-Acquisition)
-# and treats withdrawals as transfers.
+# conservative (default): unmatched deposits are Review-Acquisition at market
+# value, so they receive a cost. Unmatched withdrawals stay on the review
+# queue and are not treated as transfers. The integrity check fails until
+# that queue is empty or every leftover is in review_exceptions.
+# reject skips _Needs-Review with a warning and does not abort the file.
+# market acquires deposits at market value and treats withdrawals as transfers.
+# That hides an unmatched send inside the Section 104 pool.
 # disposal treats both as gifts. This can invent large losses.
-# transfer treats both as transfers. Real disposals can disappear and the pool can invert.
-# Overrides print a warning and a count. Confirm every row.
-review_rows: reject
+# transfer treats both as transfers. Real disposals can disappear.
+review_rows: conservative
 
 # Binance BNB converts, split the BNB amount evenly across multiple tokens converted at the same time
 binance_multi_bnb_split_even: False

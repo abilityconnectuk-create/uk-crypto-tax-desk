@@ -20,6 +20,7 @@ from .exceptions import (
     TransactionParserError,
     UnexpectedDataError,
 )
+from .review_queue import QueueItem
 from .t_record import TransactionRecord
 from .tax import TaxCalculator
 from .transactions import Buy, Sell
@@ -57,6 +58,8 @@ class TransactionRow:
     review_assumed_count = 0
     skipped_unmapped_count = 0
     skipped_spam_count = 0
+    skipped_ignored_count = 0
+    review_queue: List["QueueItem"] = []
 
     HEADER = [
         "Type",
@@ -569,7 +572,12 @@ class TransactionRow:
         if raw == "_Possible-Spam":
             TransactionRow.skipped_spam_count += 1
             raise SkippedTransaction(self.HEADER.index("Type"), "Type", raw) from exc
+        if raw == "_Ignored":
+            TransactionRow.skipped_ignored_count += 1
+            raise SkippedTransaction(self.HEADER.index("Type"), "Type", raw) from exc
         treatment = str(config.review_rows)
+        if treatment == "conservative":
+            return self._conservative_review(exc, raw)
         has_buy = bool(self.row_dict["Buy Quantity"] or self.row_dict["Buy Asset"])
         has_sell = bool(self.row_dict["Sell Quantity"] or self.row_dict["Sell Asset"])
         if has_buy and has_sell:
@@ -595,6 +603,48 @@ class TransactionRow:
                 return TrType.GIFT_RECEIVED
             return TrType.DEPOSIT
         raise SkippedTransaction(self.HEADER.index("Type"), "Type", raw) from exc
+
+    def _conservative_review(self, exc: ValueError, raw: str) -> TrType:
+        """Deposits get a market cost. Withdrawals stay on the review queue."""
+        has_buy = bool(self.row_dict["Buy Quantity"] or self.row_dict["Buy Asset"])
+        has_sell = bool(self.row_dict["Sell Quantity"] or self.row_dict["Sell Asset"])
+        if has_buy and has_sell:
+            TransactionRow.review_assumed_count += 1
+            return TrType.TRADE
+        if has_sell and not has_buy:
+            TransactionRow.review_queue.append(self._queue_item("sell"))
+            TransactionRow.skipped_unmapped_count += 1
+            raise SkippedTransaction(
+                self.HEADER.index("Type"),
+                "Type",
+                f"{raw} (review queue: unmatched withdrawal)",
+            ) from exc
+        if has_buy and not has_sell:
+            TransactionRow.review_assumed_count += 1
+            return TrType.REVIEW_ACQUISITION
+        raise SkippedTransaction(self.HEADER.index("Type"), "Type", raw) from exc
+
+    def _queue_item(self, side: str) -> QueueItem:
+        if side == "sell":
+            asset = self.row_dict["Sell Asset"]
+            quantity = self.row_dict["Sell Quantity"]
+        else:
+            asset = self.row_dict["Buy Asset"]
+            quantity = self.row_dict["Buy Quantity"]
+        note = self.row_dict["Note"]
+        tx_hash = ""
+        marker = "tx "
+        if marker in note:
+            tx_hash = note.rsplit(marker, 1)[-1].split("|", 1)[0].strip()
+        return QueueItem(
+            timestamp=self.row_dict["Timestamp"],
+            asset=asset,
+            quantity=quantity,
+            wallet=self.row_dict["Wallet"],
+            tx_hash=tx_hash,
+            note=note,
+            disposition="review-queue",
+        )
 
     def parse_timestamp(self) -> Timestamp:
         try:

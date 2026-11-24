@@ -123,7 +123,7 @@ def _lookup_tag(mapping: Dict[str, TrType], tag: str) -> Optional[TrType]:
 def _local_fiat_value(
     asset: str, quantity: Optional[Decimal], converted: Optional[Decimal]
 ) -> Optional[Decimal]:
-    # After FX, a GBP amount's converted value often no longer equals the quantity.
+    # After foreign exchange, a pound amount's converted value often no longer equals the quantity.
     # The quantity of the local currency is the value.
     if quantity is not None and asset == config.ccy:
         return quantity

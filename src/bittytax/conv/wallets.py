@@ -48,24 +48,120 @@ class TokenGroup:
 
 
 @dataclass
-class MatchSettings:
+class MatchSettings:  # pylint: disable=too-many-instance-attributes
     window: timedelta = timedelta(hours=24)
     amount_tolerance: Decimal = Decimal("0.02")
     amount_tolerance_abs: Decimal = Decimal(0)
     token_groups: List[TokenGroup] = field(default_factory=list)
     share_pools: bool = False
+    # Wider window for the fuzzy rule. The 24 hour window above is unchanged.
+    fuzzy_window: timedelta = timedelta(hours=48)
+    # Cap used when a wallet is a configured exchange account. Tighter than 48 hours.
+    cex_window: timedelta = timedelta(hours=12)
+    bridge_window: timedelta = timedelta(hours=96)
+    official_assets: Tuple[str, ...] = ("USDT", "BTC", "ETH")
+    blocked_symbols: Tuple[str, ...] = ()
+    blocked_patterns: Tuple[str, ...] = ()
 
 
 @dataclass
-class WalletRegistry:
+class AddressRule:
+    label: str
+    address: str
+    category: str
+    chain: str = ""
+
+
+@dataclass
+class UtilityRule:
+    match: str
+    treatment: str
+
+
+@dataclass
+class MarginRules:
+    suffixes: Tuple[str, ...] = ("USDTM", "PERP")
+    patterns: Tuple[str, ...] = ("realized gain", "daily total", "bot daily")
+
+
+@dataclass
+class TaxTreatment:
+    """LP and collateral are not confirmed. The default leaves them on the queue."""
+
+    lp: str = "review"
+    collateral: str = "review"
+
+
+@dataclass
+class BridgeRules:
+    patterns: Tuple[str, ...] = ("bridge",)
+    contracts: List[AddressRule] = field(default_factory=list)
+
+
+@dataclass
+class CountException:
+    reason: str
+    wallet: str = ""
+    tx_hash: str = ""
+
+
+def _default_utilities() -> List[UtilityRule]:
+    return [
+        UtilityRule("launchpool", "income"),
+        UtilityRule("launchpad", "income"),
+        UtilityRule("dust conversion", "dust"),
+        UtilityRule("dust", "dust"),
+        UtilityRule("create-token-account", "ignore"),
+        UtilityRule("create token account", "ignore"),
+    ]
+
+
+@dataclass
+class ReconcileSettings:
+    quantity_epsilon: Decimal = Decimal("0.00000001")
+    cost_band_ratio: Decimal = Decimal("0.005")
+    cost_band_abs: Decimal = Decimal(1)
+    gains_band_ratio: Decimal = Decimal("0.01")
+    income_abs: Decimal = Decimal("0.01")
+
+
+@dataclass
+class WalletRegistry:  # pylint: disable=too-many-instance-attributes
     own: List[RegistryEntry] = field(default_factory=list)
     payees: List[RegistryEntry] = field(default_factory=list)
     match: MatchSettings = field(default_factory=MatchSettings)
     spam_symbols: List[str] = field(default_factory=list)
     spam_patterns: List[str] = field(default_factory=list)
+    venues: List[AddressRule] = field(default_factory=list)
+    contracts: List[AddressRule] = field(default_factory=list)
+    bridges: BridgeRules = field(default_factory=BridgeRules)
+    utilities: List[UtilityRule] = field(default_factory=_default_utilities)
+    margin: MarginRules = field(default_factory=MarginRules)
+    tax_treatment: TaxTreatment = field(default_factory=TaxTreatment)
+    reconcile: ReconcileSettings = field(default_factory=ReconcileSettings)
+    count_exceptions: List[CountException] = field(default_factory=list)
 
 
-_TOP_LEVEL = {"own", "payees", "match", "token_groups", "spam"}
+_TOP_LEVEL = {
+    "own",
+    "payees",
+    "match",
+    "token_groups",
+    "spam",
+    "venues",
+    "contracts",
+    "bridges",
+    "utilities",
+    "margin",
+    "tax_treatment",
+    "official_assets",
+    "reconcile",
+    "count_exceptions",
+    "review_exceptions",
+}
+_ADDRESS_CATEGORIES = {"transfer-to-venue", "swap", "lp", "collateral", "bridge"}
+_UTILITY_TREATMENTS = {"income", "dust", "ignore"}
+_TAX_TREATMENTS = {"review", "transfer", "disposal"}
 _ENTRY_KEYS = {
     "label",
     "address",
@@ -78,7 +174,15 @@ _ENTRY_KEYS = {
     "date",
     "amount",
 }
-_MATCH_KEYS = {"window_hours", "amount_tolerance", "amount_tolerance_abs", "share_pools"}
+_MATCH_KEYS = {
+    "window_hours",
+    "amount_tolerance",
+    "amount_tolerance_abs",
+    "share_pools",
+    "fuzzy_window_hours",
+    "cex_window_hours",
+    "bridge_window_hours",
+}
 
 
 def load_wallet_registry(path: str) -> WalletRegistry:
@@ -110,6 +214,29 @@ def load_wallet_registry(path: str) -> WalletRegistry:
     )
     if "token_groups" in loaded:
         registry.match.token_groups = _load_token_groups(loaded.get("token_groups"))
+    if "official_assets" in loaded:
+        registry.match.official_assets = tuple(
+            symbol.upper()
+            for symbol in _string_list(loaded.get("official_assets"), "official_assets")
+        )
+    registry.match.blocked_symbols = tuple(symbol.upper() for symbol in spam_symbols)
+    registry.match.blocked_patterns = tuple(spam_patterns)
+    if "venues" in loaded:
+        registry.venues = _load_address_rules(loaded.get("venues"), "venues", "transfer-to-venue")
+    if "contracts" in loaded:
+        registry.contracts = _load_address_rules(loaded.get("contracts"), "contracts", "")
+    if "bridges" in loaded:
+        registry.bridges = _load_bridges(loaded.get("bridges"))
+    if "utilities" in loaded:
+        registry.utilities = _load_utilities(loaded.get("utilities"))
+    if "margin" in loaded:
+        registry.margin = _load_margin(loaded.get("margin"))
+    if "tax_treatment" in loaded:
+        registry.tax_treatment = _load_tax_treatment(loaded.get("tax_treatment"))
+    if "reconcile" in loaded:
+        registry.reconcile = _load_reconcile(loaded.get("reconcile"))
+    if "count_exceptions" in loaded:
+        registry.count_exceptions = _load_count_exceptions(loaded.get("count_exceptions"))
     return registry
 
 
@@ -117,11 +244,34 @@ def override_match_settings(
     settings: MatchSettings,
     window_hours: Optional[str] = None,
     amount_tolerance: Optional[str] = None,
+    fuzzy_window_hours: Optional[str] = None,
+    cex_window_hours: Optional[str] = None,
+    bridge_window_hours: Optional[str] = None,
 ) -> None:
     if window_hours is not None:
-        settings.window = _window_from_hours(window_hours)
+        settings.window = _window_from_hours(window_hours, "window_hours")
     if amount_tolerance is not None:
         settings.amount_tolerance = _parse_tolerance(amount_tolerance, "amount_tolerance")
+    if fuzzy_window_hours is not None:
+        settings.fuzzy_window = _window_from_hours(fuzzy_window_hours, "fuzzy_window_hours")
+    if cex_window_hours is not None:
+        settings.cex_window = _window_from_hours(cex_window_hours, "cex_window_hours")
+    if bridge_window_hours is not None:
+        settings.bridge_window = _window_from_hours(bridge_window_hours, "bridge_window_hours")
+
+
+def wallet_is_cex(wallet: str, entries: Sequence[RegistryEntry]) -> bool:
+    """True when the wallet name is a configured exchange account, not a chain address."""
+    folded = wallet.strip().casefold()
+    if not folded:
+        return False
+    for entry in entries:
+        if not entry.account:
+            continue
+        names = [entry.account, entry.label]
+        if folded in {name.strip().casefold() for name in names if name}:
+            return True
+    return False
 
 
 def find_entry(
@@ -237,6 +387,14 @@ def _load_match(value: object) -> MatchSettings:
         )
     if "share_pools" in item:
         settings.share_pools = _parse_bool(item["share_pools"], "share_pools")
+    if "fuzzy_window_hours" in item:
+        settings.fuzzy_window = _window_from_hours(item["fuzzy_window_hours"], "fuzzy_window_hours")
+    if "cex_window_hours" in item:
+        settings.cex_window = _window_from_hours(item["cex_window_hours"], "cex_window_hours")
+    if "bridge_window_hours" in item:
+        settings.bridge_window = _window_from_hours(
+            item["bridge_window_hours"], "bridge_window_hours"
+        )
     return settings
 
 
@@ -298,7 +456,7 @@ def _load_spam(value: object) -> Tuple[List[str], List[str]]:
 
 
 def _pattern_list(value: object, name: str) -> List[str]:
-    """Keep whitespace, including a hair space. Only a truly empty string is rejected."""
+    """Keep white space, including a hair space. Only a truly empty string is rejected."""
     if value is None:
         return []
     if not isinstance(value, list):
@@ -365,8 +523,158 @@ def _parse_tolerance(value: object, name: str) -> Decimal:
     return decimal
 
 
-def _window_from_hours(value: object) -> timedelta:
-    hours = _parse_decimal(value, "window_hours")
+def _window_from_hours(value: object, name: str = "window_hours") -> timedelta:
+    hours = _parse_decimal(value, name)
     if hours < 0:
-        raise WalletRegistryError("window_hours cannot be negative")
+        raise WalletRegistryError(f"{name} cannot be negative")
     return timedelta(seconds=int(hours * Decimal(3600)))
+
+
+def _load_address_rules(value: object, name: str, default_category: str) -> List[AddressRule]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise WalletRegistryError(f"{name} must be a list")
+    return [
+        _load_address_rule(item, f"{name}[{index}]", default_category)
+        for index, item in enumerate(value, start=1)
+    ]
+
+
+def _load_address_rule(value: object, where: str, default_category: str) -> AddressRule:
+    item = _require_mapping(value, where)
+    unknown = set(item) - {"label", "address", "chain", "category"}
+    if unknown:
+        names = ", ".join(sorted(str(name) for name in unknown))
+        raise WalletRegistryError(f"{where} has unknown keys: {names}")
+    address = _optional_str(item, "address", where)
+    if not address:
+        raise WalletRegistryError(f"{where} needs an address")
+    category = _optional_str(item, "category", where) or default_category
+    if category not in _ADDRESS_CATEGORIES:
+        raise WalletRegistryError(f"{where}.category is not a known category: {category}")
+    label = _optional_str(item, "label", where) or address
+    return AddressRule(
+        label=label,
+        address=address,
+        category=category,
+        chain=_optional_str(item, "chain", where),
+    )
+
+
+def _load_bridges(value: object) -> BridgeRules:
+    item = _require_mapping(value, "bridges")
+    unknown = set(item) - {"patterns", "contracts"}
+    if unknown:
+        names = ", ".join(sorted(str(name) for name in unknown))
+        raise WalletRegistryError(f"bridges has unknown keys: {names}")
+    patterns = tuple(_pattern_list(item.get("patterns"), "bridges.patterns")) or ("bridge",)
+    contracts = (
+        _load_address_rules(item.get("contracts"), "bridges.contracts", "bridge")
+        if "contracts" in item
+        else []
+    )
+    return BridgeRules(patterns=patterns, contracts=contracts)
+
+
+def _load_utilities(value: object) -> List[UtilityRule]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise WalletRegistryError("utilities must be a list")
+    rules = []
+    for index, raw in enumerate(value, start=1):
+        item = _require_mapping(raw, f"utilities[{index}]")
+        unknown = set(item) - {"match", "treatment"}
+        if unknown:
+            names = ", ".join(sorted(str(name) for name in unknown))
+            raise WalletRegistryError(f"utilities[{index}] has unknown keys: {names}")
+        match = _optional_str(item, "match", f"utilities[{index}]")
+        treatment = _optional_str(item, "treatment", f"utilities[{index}]")
+        if not match:
+            raise WalletRegistryError(f"utilities[{index}] needs match")
+        if treatment not in _UTILITY_TREATMENTS:
+            raise WalletRegistryError(
+                f"utilities[{index}].treatment must be income, dust, or ignore"
+            )
+        rules.append(UtilityRule(match.casefold(), treatment))
+    return rules
+
+
+def _load_margin(value: object) -> MarginRules:
+    item = _require_mapping(value, "margin")
+    unknown = set(item) - {"asset_suffixes", "patterns"}
+    if unknown:
+        names = ", ".join(sorted(str(name) for name in unknown))
+        raise WalletRegistryError(f"margin has unknown keys: {names}")
+    suffixes = tuple(
+        symbol.upper()
+        for symbol in _string_list(item.get("asset_suffixes"), "margin.asset_suffixes")
+    )
+    patterns = tuple(_pattern_list(item.get("patterns"), "margin.patterns"))
+    if not suffixes and not patterns:
+        raise WalletRegistryError("margin needs asset_suffixes or patterns")
+    return MarginRules(suffixes=suffixes or ("USDTM",), patterns=patterns)
+
+
+def _load_tax_treatment(value: object) -> TaxTreatment:
+    item = _require_mapping(value, "tax_treatment")
+    unknown = set(item) - {"lp", "collateral"}
+    if unknown:
+        names = ", ".join(sorted(str(name) for name in unknown))
+        raise WalletRegistryError(f"tax_treatment has unknown keys: {names}")
+    treatment = TaxTreatment()
+    if "lp" in item:
+        treatment.lp = _treatment_value(item["lp"], "tax_treatment.lp")
+    if "collateral" in item:
+        treatment.collateral = _treatment_value(item["collateral"], "tax_treatment.collateral")
+    return treatment
+
+
+def _treatment_value(value: object, name: str) -> str:
+    if not isinstance(value, str) or value.strip() not in _TAX_TREATMENTS:
+        raise WalletRegistryError(f"{name} must be review, transfer, or disposal")
+    return value.strip()
+
+
+def _load_reconcile(value: object) -> ReconcileSettings:
+    item = _require_mapping(value, "reconcile")
+    allowed = {
+        "quantity_epsilon",
+        "cost_band_ratio",
+        "cost_band_abs",
+        "gains_band_ratio",
+        "income_abs",
+    }
+    unknown = set(item) - allowed
+    if unknown:
+        names = ", ".join(sorted(str(name) for name in unknown))
+        raise WalletRegistryError(f"reconcile has unknown keys: {names}")
+    settings = ReconcileSettings()
+    for key in allowed:
+        if key in item:
+            setattr(settings, key, _parse_tolerance(item[key], f"reconcile.{key}"))
+    return settings
+
+
+def _load_count_exceptions(value: object) -> List[CountException]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise WalletRegistryError("count_exceptions must be a list")
+    rows = []
+    for index, raw in enumerate(value, start=1):
+        item = _require_mapping(raw, f"count_exceptions[{index}]")
+        unknown = set(item) - {"reason", "wallet", "tx_hash"}
+        if unknown:
+            names = ", ".join(sorted(str(name) for name in unknown))
+            raise WalletRegistryError(f"count_exceptions[{index}] has unknown keys: {names}")
+        reason = _optional_str(item, "reason", f"count_exceptions[{index}]")
+        wallet = _optional_str(item, "wallet", f"count_exceptions[{index}]")
+        tx_hash = _optional_str(item, "tx_hash", f"count_exceptions[{index}]")
+        if not reason or not (wallet or tx_hash):
+            raise WalletRegistryError(
+                f"count_exceptions[{index}] needs a reason and a wallet or tx_hash"
+            )
+        rows.append(CountException(reason=reason, wallet=wallet, tx_hash=tx_hash))
+    return rows

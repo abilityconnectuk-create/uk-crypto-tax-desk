@@ -928,13 +928,14 @@ What the stage changes:
 | Untagged withdrawal or deposit, nothing matched, not your address | Type `_Needs-Review`. It is not a gift and it is not a transfer. A blank destination is still listed, with the description |
 | Tag was an explicit gift, loss, cost, and the destination is not yours | Left as parsed. Not sent for review |
 | `--legacy-gift-withdrawals` | The unmatched untagged withdrawals stay `Gift-Sent` and the unmatched untagged deposits stay `Gift-Received` |
-| `--review-as market` or `bittytax --review-rows market` (recommended) | Deposits become `Review-Acquisition` at market value. Withdrawals become `Withdrawal` |
+| `--review-as conservative` or `bittytax --review-rows conservative` (default) | Deposits become `Review-Acquisition` at market value. Withdrawals stay `_Needs-Review` and are written to the review queue. The integrity check fails until that queue is empty or every leftover is excepted |
+| `--review-as market` or `bittytax --review-rows market` | Deposits become `Review-Acquisition` at market value. Withdrawals become `Withdrawal`, so an unmatched send stays in the Section 104 pool |
 | `--review-as disposal` or `bittytax --review-rows disposal` | Those rows are treated as `Gift-Sent` / `Gift-Received` so a report can be produced. Gains may be overstated |
 | `--review-as transfer` or `bittytax --review-rows transfer` | Those rows are treated as `Withdrawal` / `Deposit`. Real disposals can disappear from the gain |
 
 `--legacy-gift-withdrawals` only applies together with `--wallets` or `--match-transfers`. Without those flags the tool behaves as it always has, which is the same end result for untagged Koinly withdrawals.
 
-`_Needs-Review` is still the default, and an unmapped type is skipped with a warning instead of aborting the file. The recommended way to produce a report is `--review-rows market` (or `review_rows: market`, and `--review-as market` on the converter). Unmatched deposits become `Review-Acquisition` at the market value already on the row. Unmatched withdrawals become `Withdrawal`. `disposal` treats the withdrawals as gifts and can invent large losses. `transfer` leaves deposits out of the pool, so a later sale can over-dispose. Whichever override you use, the report warns and counts the rows.
+The default is `conservative` (`review_rows: conservative`, and `--review-as conservative` on the converter). Unmatched deposits become `Review-Acquisition` at the market value already on the row, so they receive a cost. Unmatched withdrawals stay on the review queue and are not treated as transfers. `bittytax` fails the integrity check until that queue is empty or every leftover is listed in `--review-exceptions` with a reason. `reject` skips the rows. `market` treats the withdrawals as transfers, which hides an unmatched send inside the pool. `disposal` can invent large losses. `transfer` can hide a real disposal. Whichever override you use, the report warns and counts the rows.
 
 If a disposal is larger than the Section 104 pool, the matched cost is capped at the pool. Pool cost is not allowed to go negative. Every such disposal is listed under Missing cost basis with the date, asset, and quantity short. Missing cost is the pool's average cost times that short quantity when the pool had a balance, and the market value of the short quantity when it did not. Proceeds are that market value, and they are a gain at zero cost. The two figures are both shown because they are the same only when the pool was empty.
 
@@ -946,13 +947,29 @@ Payees do not need a destination address. A `description` is matched as a case-i
 
 Koinly amounts may contain thousands separators (`1,234.56`). Tags `Liquidity in` and `Other fee` are disposals (`Spend`). `Liquidity out` is an acquisition at the Koinly value and is not put through the income report. `Multi trade` with both a sent and a received amount is a `Trade`; a one-sided row follows the same disposal or acquisition mapping. Where the asset is already the local currency, the quantity is used as the value, because an FX round-trip of Koinly's net value often no longer matches the quantity and the accounting tool would reject the row. Liquidity-pool entries are a disposal on the way in and a new acquisition on the way out under this mapping. That is one reading, not HMRC guidance. Retag them as transfers if your accountant treats the pool as still yours.
 
-Three extra CSV files are written next to the conversion output (or as `BittyTax_Records-transfer-summary.csv`, `BittyTax_Records-needs-review.csv`, and `BittyTax_Records-possible-spam.csv` when you do not pass `-o`):
+Four extra CSV files are written next to the conversion output (or as `BittyTax_Records-transfer-summary.csv`, `BittyTax_Records-needs-review.csv`, `BittyTax_Records-possible-spam.csv`, and `BittyTax_Records-review-queue.csv` when you do not pass `-o`):
 
 - The summary lists every match and reclassification (`Action`, date, asset, amount, wallet, destination, tx hash, detail).
-- The review file lists each unmatched untagged withdrawal or deposit: date, asset, amount, wallet, destination, tx hash, and a disposition of `needs-review` or `kept-as-gift`.
+- The review file lists each unmatched untagged withdrawal or deposit: date, asset, amount, wallet, destination, tx hash, and a disposition.
 - The possible-spam file lists the rows matched by `spam.symbols` or `spam.patterns`.
+- The review queue lists withdrawals that were not classified. The integrity check fails while any of these rows is left over.
 
-`_Needs-Review` is not a BittyTax transaction type. `bittytax` skips it unless you pass `--review-rows market` (recommended), `disposal`, or `transfer`. The converter warning says the same. The original Koinly valuation stays in the raw columns beside the row in the Excel workbook.
+`_Needs-Review` is not a BittyTax transaction type. With the default `conservative` setting, a buy-side row becomes `Review-Acquisition` and a sell-side row is skipped and added to the review queue. `reject` skips both. `market`, `disposal`, and `transfer` apply the treatments in the table. The original Koinly valuation stays in the raw columns beside the row in the Excel workbook.
+
+`bittytax --year-end-snapshot snapshot.json` writes the Section 104 pool at each 5 April in Europe/London, with quantity and pooled cost in `local_currency`. A row whose UTC date and London date fall in different tax years is listed in the timezone flags file. The reconciliation command compares that snapshot with a private Koinly export folder:
+
+```
+bittytax reconcile \
+  --koinly /path/to/private/koinly-export \
+  --records records.csv \
+  --snapshot snapshot.json \
+  --wallets wallets.yaml \
+  --exceptions wallets.yaml \
+  --review-queue records-review-queue.csv \
+  --output reconcile.json
+```
+
+The folder is not committed. It holds the Koinly transaction history, capital gains, income, other gains, and end-of-year holdings CSVs. The report is JSON. T1 and T2 compare counts, P1 and P2 compare the 5 April pool, and Y1 to Y3 compare yearly totals. Y4 prints missing cost beside any Koinly shortfall and does not fail the report on its own. LP and collateral tax treatment stays in `tax_treatment` and defaults to `review` until an accountant confirms it.
 
 **Fee and cost basis. Confirm this with a UK accountant.** The stage follows the existing BittyTax defaults, which are one reading of the [HMRC Cryptoassets Manual](https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual):
 
@@ -961,7 +978,7 @@ Three extra CSV files are written next to the conversion output (or as `BittyTax
 - When a disposal is reclassified and the amount sent is larger than the amount received, the withdrawal quantity is reduced to the amount received so the two legs agree. BittyTax requires the sell quantity to be the net amount when the fee asset matches the asset sent. If no fee was recorded, the difference is stored as that fee. If a same-asset fee was already recorded and it explains the difference, that fee is kept and is not applied twice. Rows that were already `Withdrawal` / `Deposit` are not adjusted.
 - A cross-symbol pair (WETH out, ETH in) does not move cost from the WETH pool into the ETH pool, because each symbol has its own pool and both legs are excluded from it. Wrapping may itself be a disposal; the manual does not say that a wrapped token is the same asset. If they should be one pool, normalise the symbol on every row before you calculate. The group is only used to decide that the two rows are one move, and the amounts are compared one-for-one.
 
-An own-address send with no matching deposit is still a `Withdrawal`. The tokens stay in the pool, which is right if you still own them, but the other wallet will not show the receipt. If that deposit is in the file and was left as `Gift-Received` (outside the window, or over the tolerance), you will double-count it: the pool keeps the tokens and the gift adds them again at market value. The summary row says that no deposit matched. Widen the window or edit that deposit to `Deposit`.
+An own-address send with no matching deposit is still a `Withdrawal`. The tokens stay in the pool, which is right if you still own them, but the other wallet will not show the receipt. A send that is not your address, a known payee, or a matched leg is not left as that silent transfer. Under the default it stays on the review queue, and the integrity check fails until you classify it or list it in `review_exceptions`. A later unmatched deposit of the same coins is an acquisition at market value, so it does not sit on top of a withdrawal that never left the pool.
 
 ### Notes:
 1. Some exchanges only allow the export of trades. This means transaction records of deposits and withdrawals will have to be created manually, otherwise the assets will not balance.

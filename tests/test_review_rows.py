@@ -7,6 +7,7 @@ from bittytax.bt_types import TrType
 from bittytax.config import config
 from bittytax.exceptions import SkippedTransaction
 from bittytax.import_records import ImportRecords
+from bittytax.review_queue import QueueItem
 from bittytax.t_row import TransactionRow
 
 
@@ -68,6 +69,46 @@ def test_review_rows_disposal_and_transfer() -> None:
     finally:
         config.config["review_rows"] = previous
         TransactionRow.review_assumed_count = 0
+
+
+def test_conservative_acquires_a_deposit_and_queues_a_withdrawal() -> None:
+    previous = config.review_rows
+    TransactionRow.review_assumed_count = 0
+    TransactionRow.skipped_unmapped_count = 0
+    TransactionRow.review_queue = []
+    try:
+        config.config["review_rows"] = "conservative"
+        acquired = _parse(
+            "_Needs-Review",
+            **{"Buy Quantity": "2", "Buy Asset": "ETH", "Buy Value": "40"},
+        )
+        with pytest.raises(SkippedTransaction):
+            _parse(
+                "_Needs-Review",
+                **{
+                    "Sell Quantity": "0.5",
+                    "Sell Asset": "ETH",
+                    "Note": "needs review | tx 0x00000000000000000000000000000000000000aa",
+                },
+            )
+        assert acquired.t_record is not None
+        assert acquired.t_record.t_type is TrType.REVIEW_ACQUISITION
+        assert acquired.t_record.buy is not None
+        assert acquired.t_record.buy.cost == Decimal("40")
+        assert len(TransactionRow.review_queue) == 1
+        queued: QueueItem = TransactionRow.review_queue[0]
+        assert queued.asset == "ETH"
+        assert queued.quantity == "0.5"
+        assert queued.tx_hash == "0x00000000000000000000000000000000000000aa"
+        with pytest.raises(SkippedTransaction):
+            _parse("_Ignored", **{"Buy Quantity": "1", "Buy Asset": "SOL"})
+        assert TransactionRow.skipped_ignored_count == 1
+    finally:
+        config.config["review_rows"] = previous
+        TransactionRow.review_assumed_count = 0
+        TransactionRow.skipped_unmapped_count = 0
+        TransactionRow.skipped_ignored_count = 0
+        TransactionRow.review_queue = []
 
 
 def test_note_marks_a_row_already_rewritten_by_the_converter() -> None:

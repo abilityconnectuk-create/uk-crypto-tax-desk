@@ -59,3 +59,82 @@ spam:
     - USDC.e
   patterns:
     - claim
+    - "visit"
+    - "airdrop claim"
+
+# Fake CEX deposit addresses. A send here is a transfer to the venue.
+venues:
+  - label: Example CEX deposit
+    chain: ethereum
+    address: "0x00000000000000000000000000000000000000c1"
+
+# Fake routers, LP tokens and lending contracts.
+# tax_treatment below is not a confirmed rule. Leave it as review until an accountant agrees.
+contracts:
+  - label: Example router
+    chain: ethereum
+    category: swap
+    address: "0x00000000000000000000000000000000000000d1"
+  - label: Example LP
+    chain: ethereum
+    category: lp
+    address: "0x00000000000000000000000000000000000000d2"
+  - label: Example lending
+    chain: ethereum
+    category: collateral
+    address: "0x00000000000000000000000000000000000000d3"
+
+bridges:
+  patterns:
+    - bridge
+  contracts:
+    - label: Example bridge
+      chain: ethereum
+      category: bridge
+      address: "0x00000000000000000000000000000000000000b1"
+
+# Longer patterns win. income, dust and ignore are the only treatments.
+utilities:
+  - match: launchpool
+    treatment: income
+  - match: dust conversion
+    treatment: dust
+  - match: create-token-account
+    treatment: ignore
+
+margin:
+  asset_suffixes:
+    - USDTM
+    - PERP
+  patterns:
+    - realized gain
+    - daily total
+    - bot daily
+
+# LP and collateral are deliberately not hard-coded. review | transfer | disposal.
+tax_treatment:
+  lp: review
+  collateral: review
+
+official_assets:
+  - USDT
+  - BTC
+  - ETH
+
+reconcile:
+  quantity_epsilon: "0.00000001"
+  cost_band_ratio: "0.005"
+  cost_band_abs: "1"
+  gains_band_ratio: "0.01"
+  income_abs: "0.01"
+
+# Rows excluded from the T1 wallet-count comparison. Reason is required.
+count_exceptions:
+  - reason: sample bot wallet excluded from the count
+    wallet: Example Bot
+
+# Leftovers the integrity check may ignore. Reason is required.
+# A tx_hash, or a date plus asset plus amount, is required.
+review_exceptions:
+  - reason: sample leftover already checked by hand
+    tx_hash: "0x0000000000000000000000000000000000000001"

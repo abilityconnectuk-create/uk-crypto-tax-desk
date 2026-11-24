@@ -157,11 +157,27 @@ def main() -> None:
     )
     parser.add_argument(
         "--review-as",
-        choices=["reject", "market", "disposal", "transfer"],
-        default="reject",
-        help="how unmatched needs-review rows are written. reject keeps _Needs-Review. "
-        "market (recommended) acquires deposits at market value and withdrawals as transfers. "
-        "disposal writes gifts. transfer writes transfers for both. Confirm every row.",
+        choices=["conservative", "reject", "market", "disposal", "transfer"],
+        default="conservative",
+        help="how unmatched rows are written. conservative (default) acquires deposits "
+        "at market value and leaves withdrawals on the review queue. reject keeps "
+        "_Needs-Review for both. market treats withdrawals as transfers. "
+        "disposal writes gifts. transfer writes transfers for both.",
+    )
+    parser.add_argument(
+        "--fuzzy-window",
+        type=str,
+        help="own-wallet fuzzy match window in hours (default 48)",
+    )
+    parser.add_argument(
+        "--cex-window",
+        type=str,
+        help="tighter window in hours when a wallet is a configured exchange account (default 12)",
+    )
+    parser.add_argument(
+        "--bridge-window",
+        type=str,
+        help="wider window in hours for bridge legs (default 96)",
     )
 
     args = parser.parse_args()
@@ -253,6 +269,9 @@ def _run_transfer_reconciliation(parser: argparse.ArgumentParser, args: argparse
             registry.match,
             window_hours=args.transfer_window,
             amount_tolerance=args.transfer_tolerance,
+            fuzzy_window_hours=args.fuzzy_window,
+            cex_window_hours=args.cex_window,
+            bridge_window_hours=args.bridge_window,
         )
     except WalletRegistryError as exc:
         sys.stderr.write(Fore.RESET)
@@ -268,13 +287,16 @@ def _run_transfer_reconciliation(parser: argparse.ArgumentParser, args: argparse
         review_as=args.review_as,
         containers=[data_file.data_rows for data_file in DataFile.data_files_ordered],
     )
-    summary_path, review_path, spam_path = reconciliation_report_paths(args.output_filename)
-    write_reconciliation_reports(result, summary_path, review_path, spam_path)
+    summary_path, review_path, spam_path, queue_path = reconciliation_report_paths(
+        args.output_filename
+    )
+    write_reconciliation_reports(result, summary_path, review_path, spam_path, queue_path)
     sys.stderr.write(f"{Fore.WHITE}{format_reconciliation_message(result)}\n")
     sys.stderr.write(
         f"{Fore.WHITE}transfer summary: {Fore.YELLOW}{os.path.abspath(summary_path)}\n"
         f"{Fore.WHITE}needs review: {Fore.YELLOW}{os.path.abspath(review_path)}\n"
         f"{Fore.WHITE}possible spam: {Fore.YELLOW}{os.path.abspath(spam_path)}\n"
+        f"{Fore.WHITE}review queue: {Fore.YELLOW}{os.path.abspath(queue_path)}\n"
     )
 
 

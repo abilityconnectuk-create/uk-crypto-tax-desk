@@ -558,14 +558,15 @@ def test_existing_withdrawal_and_deposit_keep_their_quantities() -> None:
     assert result.review == []
 
 
-def test_closest_amount_beats_a_shared_tx_hash() -> None:
+def test_shared_tx_hash_beats_a_closer_amount() -> None:
     sent = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Exchange", tx_hash="0xhash")
     closer = _make(TrType.GIFT_RECEIVED, BASE, "ETH", "1", "Ledger", tx_hash="")
     hashed = _make(TrType.GIFT_RECEIVED, BASE, "ETH", "0.99", "Cold", tx_hash="0xHASH")
-    _run(sent, closer, hashed)
-    assert closer.t_record is not None and closer.t_record.t_type is TrType.DEPOSIT
-    assert hashed.t_record is not None and hashed.t_record.t_type == NEEDS_REVIEW_TYPE
-    assert sent.t_record is not None and sent.t_record.sell_quantity == Decimal("1")
+    result = _run(sent, closer, hashed)
+    assert hashed.t_record is not None and hashed.t_record.t_type is TrType.DEPOSIT
+    assert closer.t_record is not None and closer.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert sent.t_record is not None and sent.t_record.t_type is TrType.WITHDRAWAL
+    assert "matched" in _actions(result)
 
 
 def test_trade_rows_are_ignored() -> None:
@@ -602,10 +603,11 @@ def test_report_files_list_the_review_columns(tmp_path: Path) -> None:
     ]
     assert rows[1][1:] == ["ETH", "4", "Exchange", OTHER, "0xreview", "", "needs-review"]
 
-    stem, review, spam = reconciliation_report_paths(str(tmp_path / "records.xlsx"))
+    stem, review, spam, queue = reconciliation_report_paths(str(tmp_path / "records.xlsx"))
     assert stem.endswith("records-transfer-summary.csv")
     assert review.endswith("records-needs-review.csv")
     assert spam.endswith("records-possible-spam.csv")
+    assert queue.endswith("records-review-queue.csv")
 
 
 def test_example_registry_loads() -> None:
@@ -621,6 +623,12 @@ def test_example_registry_loads() -> None:
     assert registry.match.token_groups[0].symbols == ("ETH", "WETH")
     assert registry.match.token_groups[0].liquid_symbols == ("STETH",)
     assert registry.match.token_groups[1].symbols == ("BTC", "CBBTC")
+    assert registry.venues[0].address.endswith("00c1")
+    assert registry.contracts[1].category == "lp"
+    assert registry.tax_treatment.lp == "review"
+    assert registry.tax_treatment.collateral == "review"
+    assert registry.margin.suffixes == ("USDTM", "PERP")
+    assert registry.count_exceptions[0].wallet == "Example Bot"
 
 
 def test_registry_rejects_unknown_keys(tmp_path: Path) -> None:
@@ -766,7 +774,12 @@ def test_cli_writes_transfers_and_the_review_report(
         assert review[0]["Wallet"] == "Exchange"
         assert review[0]["Destination"] == OTHER
         assert review[0]["TxHash"] == "0xunknown"
-        assert review[0]["Disposition"] == "needs-review"
+        assert review[0]["Disposition"] == "review-queue"
+        queue_path = tmp_path / "records-review-queue.csv"
+        with open(queue_path, encoding="utf-8", newline="") as handle:
+            queued = list(csv.DictReader(handle))
+        assert queued[0]["TxHash"] == "0xunknown"
+        assert queued[0]["Disposition"] == "review-queue"
     finally:
         DataFile.data_files.clear()
         DataFile.data_files_ordered.clear()
@@ -1004,9 +1017,9 @@ def test_spam_pattern_keeps_a_whitespace_lookalike(tmp_path: Path) -> None:
     assert result.spam[0].disposition == "possible-spam"
 
 
-def test_converter_warning_recommends_market() -> None:
+def test_converter_warning_names_the_review_queue() -> None:
     sent = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Exchange", destination=OTHER)
     result = _run(sent)
     message = format_reconciliation_message(result)
-    assert "--review-rows market" in message
-    assert "recommended" in message
+    assert "review queue" in message
+    assert "integrity check" in message

@@ -6,7 +6,7 @@ import copy
 import datetime
 from dataclasses import dataclass
 from decimal import Decimal, getcontext
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from colorama import Fore
 from tqdm import tqdm
@@ -34,6 +34,7 @@ from .price.valueasset import ValueAsset
 from .tax_event import TaxEvent, TaxEventCapitalGains, TaxEventIncome, TaxEventMarginTrade
 from .transactions import Buy, Sell
 from .utils import bt_tqdm_write, disable_tqdm
+from .year_end import YearEndTracker, build_snapshot_payload
 
 PRECISION = Decimal("0.00")
 
@@ -197,6 +198,7 @@ class TaxCalculator:  # pylint: disable=too-many-instance-attributes
 
         self.tax_report: Dict[Year, TaxReportRecord] = {}
         self.holdings_report: Optional[HoldingsReportRecord] = None
+        self.year_end = YearEndTracker(str(config.ccy))
 
     def pool_same_day(self) -> None:
         transactions = copy.deepcopy(self.transactions)
@@ -436,6 +438,7 @@ class TaxCalculator:  # pylint: disable=too-many-instance-attributes
             desc=f"{Fore.CYAN}process section 104{Fore.GREEN}",
             disable=disable_tqdm(),
         ):
+            self.year_end.observe(t, self.holdings)
             if t.is_crypto() and t.asset not in self.holdings:
                 self.holdings[t.asset] = Holdings(t.asset)
 
@@ -604,6 +607,48 @@ class TaxCalculator:  # pylint: disable=too-many-instance-attributes
             if t.t_type in self.MARGIN_TYPES:
                 tax_event = TaxEventMarginTrade(t)
                 self.tax_events[self._which_tax_year(tax_event.date)].append(tax_event)
+
+    def snapshot_payload(self, review_rows: str) -> Dict[str, Any]:
+        """Year-end pools plus income, margin and gains totals for reconciliation."""
+        totals: Dict[int, Dict[str, Decimal]] = {}
+        years = set(self.tax_events) | set(self.year_end.snapshots)
+        for year in sorted(years):
+            if not self._snapshot_year_supported(year):
+                continue
+            gains = self.calculate_capital_gains(Year(year))
+            income = self.calculate_income(Year(year))
+            margin = self.calculate_margin_trading(Year(year))
+            missing = Decimal(0)
+            for row in self.missing_cost_basis:
+                if self._which_tax_year(row.date) == year:
+                    missing += row.missing_cost
+            totals[year] = {
+                "income": income.totals["amount"],
+                "margin_net": (
+                    margin.totals["gains"]
+                    - margin.totals["losses"]
+                    - margin.totals["fees"]
+                    + margin.totals["fee_rebates"]
+                ),
+                "capital_gains": gains.totals["gain"],
+                "missing_cost": missing,
+            }
+        missing_rows = [
+            {
+                "date": row.date.isoformat(),
+                "asset": str(row.asset),
+                "quantity": f"{row.quantity_short:f}",
+                "proceeds": f"{row.proceeds:f}",
+                "missing_cost": f"{row.missing_cost:f}",
+            }
+            for row in self.missing_cost_basis
+        ]
+        return build_snapshot_payload(self.year_end, totals, missing_rows, review_rows)
+
+    def _snapshot_year_supported(self, year: int) -> bool:
+        if self.tax_rules in TAX_RULES_UK_COMPANY:
+            return Year(year) in CalculateCapitalGains.CG_DATA_COMPANY
+        return Year(year) in CalculateCapitalGains.CG_DATA_INDIVIDUAL
 
     def _all_transactions(self) -> List[Union[Buy, Sell]]:
         return self.buys_ordered + self.sells_ordered + self.other_transactions
