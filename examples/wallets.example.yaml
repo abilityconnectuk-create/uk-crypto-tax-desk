@@ -133,8 +133,10 @@ asset_names:
     - ETH (Ethereum)
   USDT:
     - Tether
-    - Tether USD
     - USDT (Tether)
+# "Tether USD" is not a built-in name. Add it under USDT only when that exact
+# label is official USDT. A lookalike such as "USDT (Tether USD)" stays separate
+# until this list names it.
 
 reconcile:
   quantity_epsilon: "0.00000001"

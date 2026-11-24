@@ -11,7 +11,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Set
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 import dateutil.parser
 
@@ -66,8 +66,10 @@ class Desk:
 _DEFAULT_ASSET_NAMES: Dict[str, Sequence[str]] = {
     "BTC": ("Bitcoin", "BTC (Bitcoin)"),
     "ETH": ("Ethereum", "ETH (Ethereum)"),
-    "USDT": ("Tether", "Tether USD", "USDT (Tether)"),
+    "USDT": ("Tether", "USDT (Tether)"),
 }
+# A holdings currency cell with one of these names is a totals line, not an asset.
+_SUMMARY_ASSETS = {"total", "totals", "grand total", "subtotal", "sum"}
 _INCOME_TAGS = {
     "airdrop",
     "fork",
@@ -92,12 +94,17 @@ _MARGIN_TAGS = {
 _COUNTING_NOTES = (
     "T1 and T2 follow the rows the Koinly converter writes. "
     "A tax-report transfer is one withdrawal on the sending wallet and one deposit "
-    "on the receiving wallet. A buy, sell or exchange is one trade on a single wallet. "
+    "on the receiving wallet. T2 counts those two legs. When the engine writes the "
+    "pair as one row, the note says transfer match and that row counts as both a "
+    "withdrawal and a deposit. Two engine rows with the same match keep their own "
+    "types. A buy, sell or exchange is one trade on a single wallet. "
     "A bulk-edit row with both a from amount and a to amount is one trade on the "
     "To wallet, including when its type says transfer. "
     "Reward, income, airdrop, mining, salary and lending interest are income. "
     "Realized gain and margin fee are margin. Those rows are not also counted as "
     "deposits or withdrawals. A wallet name drops the id after a semicolon.",
+    "Y1, Y2 and Y3 compare only years present in that Koinly report. A snapshot "
+    "year with no report is listed under skipped_years and is not treated as zero.",
     "Y3 compares Koinly net capital gains, which include futures, with spot "
     "capital gains plus the margin net.",
     "Y4 missing cost uses a numeric missing-cost column when the file has one. "
@@ -106,7 +113,10 @@ _COUNTING_NOTES = (
     "disposal whose cost is zero or blank and whose proceeds are positive counts "
     "for those proceeds. Y4 does not fail the report.",
     "P1 and P2 map a Koinly label onto a symbol only when asset_names lists that "
-    "official name. BTC (Bitcoin) can match BTC. BTC (Bear Trump Coin) cannot.",
+    "official name. BTC (Bitcoin) can match BTC. BTC (Bear Trump Coin) cannot. "
+    "The built-in names do not include Tether USD, so USDT (Tether USD) stays "
+    "separate unless a local asset_names entry lists that name. "
+    "A holdings row named Total, Totals, Grand Total or Subtotal is not an asset.",
 )
 
 
@@ -294,6 +304,7 @@ def _read_pack(directory: str, skip_wallets: Set[str], desk: Desk) -> KoinlyPack
 def _read_engine(path: str) -> Dict[str, Dict[str, int]]:
     wallets: Dict[str, int] = {}
     types: Dict[str, int] = {}
+    paired: Dict[str, List[str]] = {}
     with open(path, newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
         for row in reader:
@@ -301,8 +312,36 @@ def _read_engine(path: str) -> Dict[str, Dict[str, int]]:
             if wallet:
                 wallets[wallet] = wallets.get(wallet, 0) + 1
             bucket = _ENGINE_BUCKETS.get((row.get("Type") or "").strip(), "other")
-            types[bucket] = types.get(bucket, 0) + 1
+            match_id = _transfer_match_id(row.get("Note") or "")
+            if match_id:
+                paired.setdefault(match_id, []).append(bucket)
+            else:
+                types[bucket] = types.get(bucket, 0) + 1
+    _count_paired_transfers(types, paired)
     return {"wallets": wallets, "types": types}
+
+
+def _transfer_match_id(note: str) -> str:
+    """Return the match number from a converter note, or an empty string."""
+    found = re.search(r"transfer match (\d+)", note, re.IGNORECASE)
+    if found is None:
+        return ""
+    return found.group(1)
+
+
+def _count_paired_transfers(types: Dict[str, int], paired: Mapping[str, Sequence[str]]) -> None:
+    """Count a paired transfer on the same basis as the Koinly deposit and withdrawal legs.
+
+    Two engine rows that share a match keep their own types. One row means the pair was
+    written as a single record, so it counts as one withdrawal and one deposit.
+    """
+    for buckets in paired.values():
+        if len(buckets) == 1:
+            types["withdrawal"] = types.get("withdrawal", 0) + 1
+            types["deposit"] = types.get("deposit", 0) + 1
+            continue
+        for bucket in buckets:
+            types[bucket] = types.get(bucket, 0) + 1
 
 
 def _check_wallets(
@@ -376,7 +415,9 @@ def _check_costs(pack: KoinlyPack, snapshot: Mapping[str, Any], desk: Desk) -> D
     for holding in pack.holdings:
         year = holding.tax_year
         costs = _costs_for(snapshot, year)
-        for asset, koinly_cost in sorted(holding.costs.items()):
+        names = sorted(set(holding.costs) | set(costs))
+        for asset in names:
+            koinly_cost = holding.costs.get(asset, Decimal(0))
             engine_cost = costs.get(asset, Decimal(0))
             band = max(desk.cost_band_abs, abs(koinly_cost) * desk.cost_band_ratio)
             if abs(koinly_cost - engine_cost) > band:
@@ -404,10 +445,10 @@ def _check_year_total(
     years = snapshot.get("years", {})
     if not isinstance(years, dict):
         years = {}
-    names = sorted(set(koinly) | set(years))
+    names, skipped = _years_in_pack(koinly, years)
     failures = []
     for year in names:
-        left = koinly.get(year, Decimal(0))
+        left = koinly[year]
         block = years.get(year, {})
         if not isinstance(block, dict):
             block = {}
@@ -427,7 +468,16 @@ def _check_year_total(
         "other": "Y2 futures and other gains",
         "gains": "Y3 net capital gains",
     }
-    return {"name": labels[pack_key], "passed": not failures, "failures": failures}
+    return {
+        "name": labels[pack_key],
+        "passed": not failures,
+        "failures": failures,
+        "skipped_years": skipped,
+        "definition": (
+            "Compared only for years present in the Koinly report. A snapshot year "
+            "with no report is listed in skipped_years and is not treated as zero."
+        ),
+    }
 
 
 def _check_gains(pack: KoinlyPack, snapshot: Mapping[str, Any], desk: Desk) -> Dict[str, Any]:
@@ -436,10 +486,10 @@ def _check_gains(pack: KoinlyPack, snapshot: Mapping[str, Any], desk: Desk) -> D
     years = snapshot.get("years", {})
     if not isinstance(years, dict):
         years = {}
-    names = sorted(set(koinly) | set(years))
+    names, skipped = _years_in_pack(koinly, years)
     failures = []
     for year in names:
-        left = koinly.get(year, Decimal(0))
+        left = koinly[year]
         block = years.get(year, {})
         if not isinstance(block, dict):
             block = {}
@@ -462,11 +512,23 @@ def _check_gains(pack: KoinlyPack, snapshot: Mapping[str, Any], desk: Desk) -> D
         "name": "Y3 net capital gains",
         "passed": not failures,
         "failures": failures,
+        "skipped_years": skipped,
         "definition": (
             "Koinly net capital gains, including futures, compared with spot "
-            "capital gains plus the margin net."
+            "capital gains plus the margin net. Compared only for years present "
+            "in the Koinly report. A snapshot year with no report is listed in "
+            "skipped_years and is not treated as zero."
         ),
     }
+
+
+def _years_in_pack(
+    koinly: Mapping[str, Decimal], years: Mapping[str, Any]
+) -> Tuple[List[str], List[str]]:
+    """Years the report contains, and snapshot years that report does not contain."""
+    present = {str(year) for year in koinly}
+    skipped = sorted(str(year) for year in years if str(year) not in present)
+    return sorted(present), skipped
 
 
 def _check_missing(pack: KoinlyPack, snapshot: Mapping[str, Any]) -> Dict[str, Any]:
@@ -561,8 +623,11 @@ def _consume_holdings(rows: Sequence[Sequence[str]], desk: Desk) -> HoldingSet:
     for raw in rows[header_at + 1 :]:
         if asset_at is None or amount_at is None or asset_at >= len(raw):
             continue
-        asset = _canonical_asset(raw[asset_at].strip(), _active_names(desk))
-        if not asset or asset.casefold().startswith("balance"):
+        label = raw[asset_at].strip()
+        if not label or label.casefold().startswith("balance") or _summary_asset(label):
+            continue
+        asset = _canonical_asset(label, _active_names(desk))
+        if not asset:
             continue
         quantity = _decimal(raw[amount_at] if amount_at < len(raw) else "")
         amounts[asset] = amounts.get(asset, Decimal(0)) + quantity
@@ -882,6 +947,17 @@ def _active_names(desk: Desk) -> Mapping[str, Sequence[str]]:
     if desk.asset_names is None:
         return _DEFAULT_ASSET_NAMES
     return desk.asset_names
+
+
+def _summary_asset(label: str) -> bool:
+    """A Koinly holdings total line is not a pool asset."""
+    folded = " ".join(label.casefold().split())
+    if folded in _SUMMARY_ASSETS:
+        return True
+    if not folded.startswith("total"):
+        return False
+    rest = folded[len("total") :].strip()
+    return rest == "" or rest.startswith("(")
 
 
 def _canonical_asset(label: str, names: Mapping[str, Sequence[str]]) -> str:

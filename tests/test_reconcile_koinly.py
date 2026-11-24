@@ -386,3 +386,218 @@ def test_counts_follow_the_converter_for_transfers_income_and_margin(tmp_path: P
     assert report["checks"]["T1"]["passed"] is True, report["checks"]["T1"]
     assert report["checks"]["T2"]["passed"] is True, report["checks"]["T2"]
     assert "To wallet" in " ".join(report["notes"])
+
+
+def _blank_engine(path: Path) -> None:
+    _write(path, [["Type", "Wallet", "Timestamp", "Note"]])
+
+
+def test_holdings_total_row_is_not_an_asset(tmp_path: Path) -> None:
+    koinly = tmp_path / "koinly"
+    koinly.mkdir()
+    _write(
+        koinly / "holdings.csv",
+        [
+            ["Balances as at 2025-04-05 23:59"],
+            ["Currency", "Amount", "Cost"],
+            ["ETH", "2", "2000"],
+            ["Total", "", "99999"],
+            ["Grand Total", "9", "88888"],
+        ],
+    )
+    records = tmp_path / "records.csv"
+    snapshot = tmp_path / "snapshot.json"
+    _blank_engine(records)
+    _snapshot(snapshot)
+    report = build_report(
+        koinly_dir=str(koinly),
+        records_path=str(records),
+        snapshot_path=str(snapshot),
+    )
+    failed = {row["asset"] for row in report["checks"]["P2"]["failures"]}
+    assert "Total" not in failed
+    assert "Grand Total" not in failed
+    assert report["checks"]["P2"]["passed"] is True, report["checks"]["P2"]
+    assert report["checks"]["P1"]["passed"] is True, report["checks"]["P1"]
+
+
+def test_engine_only_pool_cost_fails_p2(tmp_path: Path) -> None:
+    koinly = tmp_path / "koinly"
+    koinly.mkdir()
+    _write(
+        koinly / "holdings.csv",
+        [
+            ["Balances as at 2025-04-05 23:59"],
+            ["Currency", "Amount", "Cost"],
+            ["ETH", "2", "2000"],
+        ],
+    )
+    records = tmp_path / "records.csv"
+    snapshot = tmp_path / "snapshot.json"
+    _blank_engine(records)
+    _snapshot(snapshot)
+    payload = json.loads(snapshot.read_text(encoding="utf-8"))
+    payload["pools"]["2025"]["assets"].append(
+        {"asset": "SOL", "quantity": "0", "cost": "80", "fees": "0"}
+    )
+    snapshot.write_text(json.dumps(payload), encoding="utf-8")
+    report = build_report(
+        koinly_dir=str(koinly),
+        records_path=str(records),
+        snapshot_path=str(snapshot),
+    )
+    failures = report["checks"]["P2"]["failures"]
+    assert report["checks"]["P2"]["passed"] is False
+    assert failures[0]["asset"] == "SOL"
+    assert failures[0]["koinly"] == "0"
+    assert failures[0]["engine"] == "80"
+
+
+def test_missing_koinly_year_is_skipped_not_treated_as_zero(tmp_path: Path) -> None:
+    koinly = tmp_path / "koinly"
+    koinly.mkdir()
+    _write(koinly / "other_gains.csv", [["Date", "Gain"], ["2024-08-01", "5"]])
+    records = tmp_path / "records.csv"
+    snapshot = tmp_path / "snapshot.json"
+    _blank_engine(records)
+    snapshot.write_text(
+        json.dumps(
+            {
+                "pools": {},
+                "years": {
+                    "2025": {"income": "40", "margin_net": "5", "capital_gains": "0"},
+                    "2026": {"income": "10", "margin_net": "80", "capital_gains": "25"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    report = build_report(
+        koinly_dir=str(koinly),
+        records_path=str(records),
+        snapshot_path=str(snapshot),
+    )
+    assert report["checks"]["Y1"]["passed"] is True, report["checks"]["Y1"]
+    assert report["checks"]["Y1"]["skipped_years"] == ["2025", "2026"]
+    assert report["checks"]["Y2"]["passed"] is True, report["checks"]["Y2"]
+    assert report["checks"]["Y2"]["skipped_years"] == ["2026"]
+    assert report["checks"]["Y3"]["passed"] is True, report["checks"]["Y3"]
+    assert report["checks"]["Y3"]["skipped_years"] == ["2025", "2026"]
+    assert "skipped_years" in " ".join(report["notes"])
+
+    _write(koinly / "income.csv", [["Date", "Income"], ["2024-06-01", "10"]])
+    mismatch = build_report(
+        koinly_dir=str(koinly),
+        records_path=str(records),
+        snapshot_path=str(snapshot),
+    )
+    income_failures = mismatch["checks"]["Y1"]["failures"]
+    assert [row["tax_year"] for row in income_failures] == ["2025"]
+    assert mismatch["checks"]["Y1"]["skipped_years"] == ["2026"]
+
+
+def test_default_names_leave_usdt_tether_usd_unmerged(tmp_path: Path) -> None:
+    koinly = tmp_path / "koinly"
+    koinly.mkdir()
+    _write(
+        koinly / "holdings.csv",
+        [
+            ["Balances as at 2025-04-05 23:59"],
+            ["Currency", "Amount", "Cost"],
+            ["USDT (Tether)", "1", "1"],
+            ["USDT (Tether USD)", "5", "50"],
+        ],
+    )
+    records = tmp_path / "records.csv"
+    snapshot = tmp_path / "snapshot.json"
+    _blank_engine(records)
+    snapshot.write_text(
+        json.dumps(
+            {
+                "pools": {
+                    "2025": {
+                        "as_of": "2025-04-05",
+                        "assets": [
+                            {"asset": "USDT", "quantity": "1", "cost": "1", "fees": "0"},
+                        ],
+                    }
+                },
+                "years": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    report = build_report(
+        koinly_dir=str(koinly),
+        records_path=str(records),
+        snapshot_path=str(snapshot),
+    )
+    assert "Tether USD" not in report["asset_names"]["USDT"]
+    failed = {row["asset"] for row in report["checks"]["P1"]["failures"]}
+    assert failed == {"USDT (Tether USD)"}
+
+    wallets = tmp_path / "wallets.yaml"
+    wallets.write_text("asset_names:\n  USDT:\n    - Tether USD\n", encoding="utf-8")
+    mapped = build_report(
+        koinly_dir=str(koinly),
+        records_path=str(records),
+        snapshot_path=str(snapshot),
+        wallets_path=str(wallets),
+    )
+    mapped_assets = {row["asset"] for row in mapped["checks"]["P1"]["failures"]}
+    assert "USDT (Tether USD)" not in mapped_assets
+    assert "USDT (Tether)" in mapped_assets
+
+
+def test_t2_counts_paired_transfers_as_two_legs(tmp_path: Path) -> None:
+    koinly = tmp_path / "koinly"
+    koinly.mkdir()
+    _write(
+        koinly / "transaction_history.csv",
+        [
+            [
+                "Date",
+                "Type",
+                "Sending Wallet",
+                "Sent Amount",
+                "Receiving Wallet",
+                "Received Amount",
+            ],
+            ["2024-06-02", "transfer", "Exchange", "1", "Ledger", "1"],
+            ["2024-06-03", "crypto_deposit", "", "", "Ledger", "4"],
+        ],
+    )
+    records = tmp_path / "records.csv"
+    snapshot = tmp_path / "snapshot.json"
+    snapshot.write_text(json.dumps({"pools": {}, "years": {}}), encoding="utf-8")
+    _write(
+        records,
+        [
+            ["Type", "Wallet", "Note"],
+            ["Trade", "Exchange", "transfer match 4"],
+            ["Deposit", "Ledger", ""],
+        ],
+    )
+    report = build_report(
+        koinly_dir=str(koinly),
+        records_path=str(records),
+        snapshot_path=str(snapshot),
+    )
+    assert report["checks"]["T2"]["passed"] is True, report["checks"]["T2"]
+    assert "both a withdrawal and a deposit" in " ".join(report["notes"])
+
+    _write(
+        records,
+        [
+            ["Type", "Wallet", "Note"],
+            ["Withdrawal", "Exchange", "transfer match 4"],
+            ["Deposit", "Ledger", "transfer match 4"],
+            ["Deposit", "Ledger", ""],
+        ],
+    )
+    paired = build_report(
+        koinly_dir=str(koinly),
+        records_path=str(records),
+        snapshot_path=str(snapshot),
+    )
+    assert paired["checks"]["T2"]["passed"] is True, paired["checks"]["T2"]

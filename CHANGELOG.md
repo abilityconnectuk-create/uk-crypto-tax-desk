@@ -9,6 +9,11 @@ The price data cache format has been updated to correctly distinguish assets tha
 The new `price_via_btc` config option may not exist in your config file. If it is missing, BittyTax keeps the legacy BTC-intermediate behaviour for backward compatibility. Add `price_via_btc: False` to your config if you want historic prices to use direct local currency lookups.
 
 ### Fixed
+- Reconciliation: a holdings summary row named Total, Totals, Grand Total or Subtotal is not compared as an asset.
+- Reconciliation: pool cost compares the union of the Koinly costs and the engine pool, so an engine-only leftover pool fails P2.
+- Reconciliation: yearly income, other gains and net gains are compared only for years present in the Koinly report. A snapshot year with no report is listed in `skipped_years` and is not treated as zero.
+- Reconciliation: the built-in asset names no longer alias `Tether USD` to USDT, so `USDT (Tether USD)` stays separate unless a local `asset_names` entry lists that name.
+- Reconciliation: a paired transfer written as one engine row counts as both a withdrawal and a deposit in T2. Two rows that share the match keep their own types.
 - Accounting tool: the 5 April Section 104 snapshot is taken in time order and includes the final open tax year, so a later-named asset bought only in an earlier year is not dropped.
 - Reconciliation: an ISO holdings title such as `2025-04-05 23:59` stays 5 April 2025 (tax year 2024/25) instead of being read as 4 May.
 - Reconciliation: `asset_names` maps an official Koinly label such as `BTC (Bitcoin)` onto `BTC`. A different name in the brackets is not merged.
