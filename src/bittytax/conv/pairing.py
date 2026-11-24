@@ -57,6 +57,8 @@ _CONTRACT_IN_NAME = re.compile(r"\((0x[0-9a-fA-F]{8,})\)")
 _FEE_WORD = re.compile(r"\b(fee|gas)\b")
 _DUST_RATIO = Decimal(20)
 _DUST_QTY = Decimal("0.01")
+_COLLECTIBLE_MARK = re.compile(r"#\s*\d+")
+_POLICY_MARK = re.compile(r"(?:^|[^0-9A-Fa-f])([0-9A-Fa-f]{56})(?:$|[^0-9A-Fa-f])")
 _EXPLICIT_TAGS = {"gift", "lost", "donation", "cost"}
 _MARGIN_TYPES = (
     TrType.MARGIN_GAIN,
@@ -245,49 +247,10 @@ def pair_cex_chain(
         )
 
 
-def pair_bridges(
-    legs: Sequence[TransferLeg], registry: WalletRegistry, result: ReconcileResult
-) -> None:
-    incoming = [leg for leg in legs if leg.direction == "in" and leg.eligible and not leg.consumed]
-    index = LegIndex(incoming, registry.match)
-    for out in legs:
-        if out.direction != "out" or not out.eligible or out.consumed:
-            continue
-        if not _bridge_evidence(out.row, registry):
-            continue
-        chosen = _closest_bridge_in(
-            out, index.time_window(out, registry.match.bridge_window), registry
-        )
-        if chosen is None:
-            continue
-        if assets_compatible(_asset(out.row, "out"), _asset(chosen.row, "in"), registry.match):
-            record_transfer_pair(
-                out,
-                chosen,
-                registry.match,
-                result,
-                "bridge; same token, different chain",
-                "bridge-transfer",
-            )
-        else:
-            _merge_exchange(
-                out,
-                chosen,
-                result,
-                "bridge-exchange",
-                "bridge; different token treated as an exchange",
-            )
-
-
 def pair_same_wallet_swaps(
     legs: Sequence[TransferLeg], registry: WalletRegistry, result: ReconcileResult
 ) -> None:
-    """One principal out and a different principal in. Off unless the setting is on.
-
-    Fee and dust legs are not principals. A hash that names two of your own
-    wallets is left for transfer handling. An out with no principal in stays
-    unmatched. The fee's local value is added to the acquired cost.
-    """
+    """One principal out and a different principal in. Off unless the setting is on."""
     if not registry.match.same_wallet_swaps:
         return
     grouped: Dict[str, List[TransferLeg]] = {}
@@ -325,7 +288,7 @@ def pair_receipt_tokens(
         if digest:
             grouped.setdefault(digest, []).append(leg)
     for group in grouped.values():
-        _apply_receipt_rules(group, rules, result)
+        _apply_receipt_rules(group, rules, result, registry)
 
 
 def pair_swaps(
@@ -596,55 +559,6 @@ def _cex_candidate(out: TransferLeg, incoming: TransferLeg, registry: WalletRegi
     return _dest_links(out, incoming, registry)
 
 
-def _bridge_candidate(out: TransferLeg, incoming: TransferLeg, registry: WalletRegistry) -> bool:
-    if not _wallets_differ(out, incoming):
-        return False
-    if _gap(out, incoming) > registry.match.bridge_window:
-        return False
-    same = assets_compatible(_asset(out.row, "out"), _asset(incoming.row, "in"), registry.match)
-    if same and not amounts_match(out.row, incoming.row, registry.match):
-        return False
-    if same:
-        return _chains_differ(out.row, incoming.row) or _bridge_evidence(incoming.row, registry)
-    return (
-        _bridge_evidence(incoming.row, registry)
-        or hashes_equal(_tx_hash(out.row), _tx_hash(incoming.row))
-        or _chains_differ(out.row, incoming.row)
-    )
-
-
-def _closest_bridge_in(
-    out: TransferLeg, incoming: Sequence[TransferLeg], registry: WalletRegistry
-) -> Optional[TransferLeg]:
-    """Closest unused in-leg whose amount fits. The same asset is preferred.
-
-    A later exact amount does not beat a nearer compatible one. A different
-    asset does not win when a same-asset leg also fits.
-    """
-    same: List[TransferLeg] = []
-    changed: List[TransferLeg] = []
-    for leg in incoming:
-        if leg.consumed or leg.row is out.row or not _bridge_candidate(out, leg, registry):
-            continue
-        if not amounts_match(out.row, leg.row, registry.match):
-            continue
-        if assets_compatible(_asset(out.row, "out"), _asset(leg.row, "in"), registry.match):
-            same.append(leg)
-        else:
-            changed.append(leg)
-    pool = same or changed
-    if not pool:
-        return None
-    return min(pool, key=_gap_from(out))
-
-
-def _gap_from(out: TransferLeg) -> Callable[[TransferLeg], timedelta]:
-    def _measure(incoming: TransferLeg) -> timedelta:
-        return _gap(out, incoming)
-
-    return _measure
-
-
 def _pair_wallet_group(
     group: Sequence[TransferLeg],
     legs: Sequence[TransferLeg],
@@ -674,6 +588,11 @@ def _pair_one_wallet(
         return
     out, received = outs[0], incoming[0]
     if assets_compatible(_asset(out.row, "out"), _asset(received.row, "in"), registry.match):
+        return
+    if _collectible_leg(out) or _collectible_leg(received):
+        detail = "token name left on review"
+        _flag(out, result, "nft-review", detail)
+        _flag(received, result, "nft-review", detail)
         return
     if _lp_looking(out, received, registry):
         detail = "LP or receipt token left on review"
@@ -732,7 +651,11 @@ def _named_own_wallet(wallet: str, registry: WalletRegistry) -> bool:
 
 
 def _dust_or_fee(leg: TransferLeg, legs: Sequence[TransferLeg]) -> bool:
-    """A fee word, a tiny same-side leg, or a much smaller local value."""
+    """A fee word, a tiny leg beside a real one, or a much smaller local value.
+
+    The same tests apply to an incoming leg. A tiny out is still a principal
+    when both local values are the same size.
+    """
     if _FEE_WORD.search(_text(leg.row)):
         return True
     quantity = _leg_quantity(leg)
@@ -745,19 +668,36 @@ def _dust_or_fee(leg: TransferLeg, legs: Sequence[TransferLeg]) -> bool:
             continue
         other_qty = _leg_quantity(other)
         other_asset = _asset(other.row, other.direction).strip().upper()
-        tiny_side = (
-            other.direction == leg.direction
-            and quantity < _DUST_QTY
-            and other_qty >= quantity * _DUST_RATIO
-        )
-        same_asset = other_asset == asset and other_qty >= quantity * _DUST_RATIO
-        if tiny_side or same_asset:
-            return True
         other_value = _leg_value(other)
-        if value is not None and value > 0 and other_value is not None:
-            if other_value >= value * _DUST_RATIO:
-                return True
+        if other_asset == asset and other_qty >= quantity * _DUST_RATIO:
+            return True
+        if _value_is_dust(value, other_value):
+            return True
+        if _values_are_principal(value, other_value):
+            continue
+        if quantity <= _DUST_QTY and other_qty >= quantity * _DUST_RATIO:
+            return True
     return False
+
+
+def _value_is_dust(value: Optional[Decimal], other: Optional[Decimal]) -> bool:
+    return value is not None and other is not None and value > 0 and other >= value * _DUST_RATIO
+
+
+def _values_are_principal(value: Optional[Decimal], other: Optional[Decimal]) -> bool:
+    if value is None or other is None or value <= 0 or other <= 0:
+        return False
+    return value * _DUST_RATIO > other and other * _DUST_RATIO > value
+
+
+def _collectible_leg(leg: TransferLeg) -> bool:
+    """A hash id or a policy-style name is not a fungible swap."""
+    name = _asset(leg.row, leg.direction).strip()
+    if not name:
+        return False
+    if _COLLECTIBLE_MARK.search(name) or _POLICY_MARK.search(name):
+        return True
+    return _leg_quantity(leg) == 1 and "#" in name
 
 
 def _hash_siblings(leg: TransferLeg, legs: Sequence[TransferLeg]) -> List[TransferLeg]:
@@ -802,7 +742,10 @@ def _leg_value(leg: TransferLeg) -> Optional[Decimal]:
 
 
 def _apply_receipt_rules(
-    group: Sequence[TransferLeg], rules: Sequence[ReceiptTokenRule], result: ReconcileResult
+    group: Sequence[TransferLeg],
+    rules: Sequence[ReceiptTokenRule],
+    result: ReconcileResult,
+    registry: WalletRegistry,
 ) -> None:
     for out in group:
         if out.direction != "out" or not _leg_readable(out):
@@ -812,6 +755,8 @@ def _apply_receipt_rules(
             continue
         incoming = _receipt_in(out, group, rule)
         if incoming is None:
+            if _contract_claims(out, registry):
+                continue
             _flag(out, result, "receipt-missing", "deposit has no receipt-token in-leg")
             continue
         _merge_exchange(
@@ -821,6 +766,12 @@ def _apply_receipt_rules(
             "receipt-exchange",
             "deposit and receipt token on one hash",
         )
+
+
+def _contract_claims(out: TransferLeg, registry: WalletRegistry) -> bool:
+    """Leave a deposit for the contract rule when no receipt leg arrived."""
+    rule = _rule_on(out.row, registry, "", "out")
+    return rule is not None and rule.category not in ("swap", "bridge")
 
 
 def _receipt_rule(

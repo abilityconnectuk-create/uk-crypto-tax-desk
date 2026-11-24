@@ -370,3 +370,114 @@ def test_receipt_token_exchange_needs_the_receipt_leg_and_is_off_by_default() ->
     held = _run(plain_out, plain_in)
     assert "receipt-exchange" not in _actions(held)
     assert plain_out.t_record is not None and plain_out.t_record.t_type == NEEDS_REVIEW_TYPE
+
+
+def test_a_dust_receive_is_not_the_principal_in_leg() -> None:
+    registry = _swaps_on()
+    digest = "0x" + "81" * 16
+    out = _make(TrType.GIFT_SENT, BASE, "USDT", "3424", "Ledger", tx_hash=digest, value="3424.96")
+    incoming = _make(TrType.GIFT_RECEIVED, BASE, "SUI", "0.0004", "Ledger", tx_hash=digest)
+    result = _run(out, incoming, registry=registry)
+    assert "same-wallet-swap" not in _actions(result)
+    assert out.t_record is not None and out.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert out.t_record.t_type is not TrType.TRADE
+    assert incoming.t_record is not None and incoming.t_record.t_type == NEEDS_REVIEW_TYPE
+
+    other = "0x" + "82" * 16
+    stable = _make(TrType.GIFT_SENT, BASE, "USDC.e", "392", "Ledger", tx_hash=other, value="392")
+    dust = _make(TrType.GIFT_RECEIVED, BASE, "SUI", "0.0036", "Ledger", tx_hash=other, value="0.02")
+    again = _run(stable, dust, registry=registry)
+    assert "same-wallet-swap" not in _actions(again)
+    assert stable.t_record is not None and stable.t_record.t_type is not TrType.TRADE
+
+
+def test_a_tiny_native_out_is_not_a_swap_unless_both_values_are_principal() -> None:
+    registry = _swaps_on()
+    digest = "0x" + "83" * 16
+    out = _make(TrType.GIFT_SENT, BASE, "SOL", "0.01", "Ledger", tx_hash=digest)
+    incoming = _make(TrType.GIFT_RECEIVED, BASE, "WIDGET", "250", "Ledger", tx_hash=digest)
+    held = _run(out, incoming, registry=registry)
+    assert "same-wallet-swap" not in _actions(held)
+    assert out.t_record is not None and out.t_record.t_type == NEEDS_REVIEW_TYPE
+
+    priced = "0x" + "84" * 16
+    paid = _make(TrType.GIFT_SENT, BASE, "SOL", "0.01", "Ledger", tx_hash=priced, value="50")
+    bought = _make(
+        TrType.GIFT_RECEIVED, BASE, "WIDGET", "250", "Ledger", tx_hash=priced, value="50"
+    )
+    swapped = _run(paid, bought, registry=registry)
+    assert paid.t_record is not None and paid.t_record.t_type is TrType.TRADE
+    assert paid.t_record.buy_asset == "WIDGET"
+    assert "same-wallet-swap" in _actions(swapped)
+
+    fee_only = "0x" + "85" * 16
+    gas = _make(TrType.GIFT_SENT, BASE, "SOL", "0.01", "Ledger", tx_hash=fee_only, value="0.20")
+    token = _make(
+        TrType.GIFT_RECEIVED, BASE, "WIDGET", "250", "Ledger", tx_hash=fee_only, value="50"
+    )
+    skipped = _run(gas, token, registry=registry)
+    assert "same-wallet-swap" not in _actions(skipped)
+    assert gas.t_record is not None and gas.t_record.t_type is not TrType.TRADE
+
+
+def test_collectible_names_are_not_same_wallet_swaps() -> None:
+    registry = _swaps_on()
+    digest = "0x" + "86" * 16
+    out = _make(TrType.GIFT_SENT, BASE, "TEDDY BEARS #12", "1", "Ledger", tx_hash=digest)
+    incoming = _make(TrType.GIFT_RECEIVED, BASE, "TEDDY BEARS #15", "1", "Ledger", tx_hash=digest)
+    result = _run(out, incoming, registry=registry)
+    assert "same-wallet-swap" not in _actions(result)
+    assert "nft-review" in _actions(result)
+    assert out.t_record is not None and out.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert incoming.t_record is not None and incoming.t_record.t_type == NEEDS_REVIEW_TYPE
+
+    policy = "0x" + "87" * 16
+    name = "a" * 56
+    left = _make(TrType.GIFT_SENT, BASE, name, "1", "Ledger", tx_hash=policy, value="20")
+    right = _make(TrType.GIFT_RECEIVED, BASE, "USDC", "20", "Ledger", tx_hash=policy, value="20")
+    reviewed = _run(left, right, registry=registry)
+    assert left.t_record is not None and left.t_record.t_type is not TrType.TRADE
+    assert "nft-review" in _actions(reviewed)
+
+
+def test_receipt_token_beats_collateral_when_the_receipt_leg_is_present() -> None:
+    venue = "0x" + "c0" * 20
+    registry = _registry()
+    registry.contracts = [AddressRule("Example lending", venue, "collateral", "ethereum")]
+    registry.receipt_tokens = [ReceiptTokenRule(venue=venue, deposit="USDC", receipt="Z0USDC")]
+    digest = "0x" + "93" * 16
+    out = _make(
+        TrType.GIFT_SENT,
+        BASE,
+        "USDC",
+        "100",
+        "Ledger",
+        destination=venue,
+        tx_hash=digest,
+        chain="ethereum",
+    )
+    incoming = _make(
+        TrType.GIFT_RECEIVED, BASE, "Z0USDC", "100", "Ledger", tx_hash=digest, chain="ethereum"
+    )
+    booked = _run(out, incoming, registry=registry)
+    assert out.t_record is not None and out.t_record.t_type is TrType.TRADE
+    assert out.t_record.buy_asset == "Z0USDC"
+    assert incoming.t_record is None
+    assert "receipt-exchange" in _actions(booked)
+    assert "collateral" not in _actions(booked)
+
+    lone = _make(
+        TrType.GIFT_SENT,
+        BASE,
+        "USDC",
+        "100",
+        "Ledger",
+        destination=venue,
+        tx_hash="0x" + "94" * 16,
+        chain="ethereum",
+    )
+    reviewed = _run(lone, registry=registry)
+    assert lone.t_record is not None and lone.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert lone.t_record.t_type is not TrType.TRADE
+    assert "collateral" in _actions(reviewed)
+    assert "receipt-missing" not in _actions(reviewed)

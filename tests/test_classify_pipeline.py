@@ -269,6 +269,141 @@ def test_bridge_keeps_usdt_and_usdc_apart_and_a_token_change_is_an_exchange() ->
     assert "bridge-exchange" in _actions(swapped)
 
 
+def _without_chain(row):
+    row.row_dict.pop("Chain", None)
+    return row
+
+
+def test_bridge_matches_on_value_when_the_input_has_no_chain_column() -> None:
+    registry = _registry(
+        own=[
+            RegistryEntry(label="Exchange", account="Exchange", chain="ethereum"),
+            RegistryEntry(label="Ledger", account="Ledger", chain="arbitrum"),
+        ]
+    )
+    first = _without_chain(
+        _make(
+            TrType.GIFT_SENT,
+            BASE,
+            "USDC",
+            "1000",
+            "Exchange",
+            tx_hash="0x" + "b1" * 16,
+            value="1000",
+        )
+    )
+    other = _without_chain(
+        _make(
+            TrType.GIFT_RECEIVED,
+            BASE + timedelta(minutes=5),
+            "USDT",
+            "1000",
+            "Ledger",
+            tx_hash="0x" + "b3" * 16,
+            value="1000",
+        )
+    )
+    close = _without_chain(
+        _make(
+            TrType.GIFT_RECEIVED,
+            BASE + timedelta(minutes=30),
+            "USDC",
+            "900",
+            "Ledger",
+            tx_hash="0x" + "b4" * 16,
+            value="985",
+        )
+    )
+    later = _without_chain(
+        _make(
+            TrType.GIFT_RECEIVED,
+            BASE + timedelta(hours=10),
+            "USDC",
+            "1000",
+            "Ledger",
+            tx_hash="0x" + "b5" * 16,
+            value="1000",
+        )
+    )
+    first.row_dict["Description"] = "bridge out"
+    result = _run(first, other, close, later, registry=registry)
+    assert first.t_record is not None and first.t_record.t_type is TrType.WITHDRAWAL
+    assert close.t_record is not None and close.t_record.t_type is TrType.DEPOSIT
+    assert other.t_record is not None and other.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert later.t_record is not None and later.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert _actions(result).count("bridge-transfer") == 1
+    assert "bridge-exchange" not in _actions(result)
+
+    again = _without_chain(
+        _make(
+            TrType.GIFT_SENT,
+            BASE,
+            "USDC",
+            "1000",
+            "Exchange",
+            tx_hash="0x" + "b2" * 16,
+            value="1000",
+        )
+    )
+    extra = _without_chain(
+        _make(
+            TrType.GIFT_SENT,
+            BASE + timedelta(minutes=1),
+            "USDC",
+            "1000",
+            "Exchange",
+            tx_hash="0x" + "b8" * 16,
+            value="1000",
+        )
+    )
+    only = _without_chain(
+        _make(
+            TrType.GIFT_RECEIVED,
+            BASE + timedelta(minutes=20),
+            "USDC",
+            "900",
+            "Ledger",
+            tx_hash="0x" + "b9" * 16,
+            value="990",
+        )
+    )
+    again.row_dict["Description"] = "bridge out"
+    extra.row_dict["Description"] = "bridge out"
+    reused = _run(again, extra, only, registry=registry)
+    assert again.t_record is not None and again.t_record.t_type is TrType.WITHDRAWAL
+    assert only.t_record is not None and only.t_record.t_type is TrType.DEPOSIT
+    assert extra.t_record is not None and extra.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert _actions(reused).count("bridge-transfer") == 1
+
+    changed = _without_chain(
+        _make(
+            TrType.GIFT_SENT,
+            BASE,
+            "ETH",
+            "0.5",
+            "Exchange",
+            tx_hash="0x" + "b6" * 16,
+            value="2000",
+        )
+    )
+    bought = _without_chain(
+        _make(
+            TrType.GIFT_RECEIVED,
+            BASE + timedelta(hours=1),
+            "USDC",
+            "1500",
+            "Ledger",
+            tx_hash="0x" + "b7" * 16,
+            value="1980",
+        )
+    )
+    changed.row_dict["Description"] = "bridge out"
+    swapped = _run(changed, bought, registry=registry)
+    assert changed.t_record is not None and changed.t_record.t_type is TrType.TRADE
+    assert changed.t_record.buy_asset == "USDC"
+    assert "bridge-exchange" in _actions(swapped)
+
+
 def test_payee_stays_a_disposal() -> None:
     sent = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Exchange", destination=PAYEE)
     result = _run(sent, registry=_registry(payees=[_payee()]))

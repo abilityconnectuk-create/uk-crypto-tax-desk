@@ -18,6 +18,9 @@ The new `price_via_btc` config option may not exist in your config file. If it i
 - Conversion tool: `match.same_wallet_swaps` (default off) pairs same-hash, different-asset legs on one wallet with a blank destination into one logged trade. LP and receipt tokens stay on the review queue.
 
 ### Fixed
+- Conversion tool: a same-wallet swap no longer treats a dust receive, such as 0.0004 SUI against 3,424 USDT, as the acquired token. A tiny native-coin send is not a swap unless both local values are principal. A token name with a hash id stays on review.
+- Conversion tool: `receipt_tokens` is applied before collateral classification, so a same-hash receipt leg is an exchange. A deposit with no receipt leg still follows the collateral review.
+- Conversion tool: a bridge with no chain column uses the wallet entry's chain or any own wallet, and matches local value within tolerance. USDT and USDC stay separate, and an in-leg is not reused.
 - Conversion tool: `match.same_wallet_swaps` pairs a hash only when one wallet sends exactly one principal token and receives a different one. A hash on two of your own wallets is left for transfers. An out-only hash stays unmatched. The fee leg's local value is added to the acquired token's cost.
 - Conversion tool: a same-wallet swap no longer fails after the pair is merged. The fee check skips a consumed leg, including one whose record was cleared, so a 0.004 fee beside a 1,000 USDT to 458 sSUI swap still writes the output.
 - Conversion tool: `match.same_wallet_swaps` no longer picks a dust or fee leg, such as 0.004 of a gas token, just because the token-count gap is smaller. The large withdrawal stays the swap.

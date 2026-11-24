@@ -97,10 +97,10 @@ def reconcile_transfers(
         apply_allocation_links,
         mark_allocation_payments,
     )
+    from .bridge_pick import pair_bridges  # pylint: disable=import-outside-toplevel
     from .pairing import (  # pylint: disable=import-outside-toplevel,cyclic-import
         classify_before_pair,
         flag_unresolved,
-        pair_bridges,
         pair_by_hash,
         pair_cex_chain,
         pair_fuzzy,
@@ -109,6 +109,8 @@ def reconcile_transfers(
         pair_swaps,
     )
 
+    early = [leg for leg in (_leg_for(row, registry) for row in rows) if leg is not None]
+    pair_receipt_tokens(early, registry, result)
     classify_before_pair(rows, registry, result)
     mark_allocation_payments(rows, registry, result)
     legs = [leg for leg in (_leg_for(row, registry) for row in rows) if leg is not None]
@@ -116,7 +118,6 @@ def reconcile_transfers(
     pair_cex_chain(legs, registry, result)
     pair_bridges(legs, registry, result)
     pair_swaps(legs, registry, result)
-    pair_receipt_tokens(legs, registry, result)
     pair_same_wallet_swaps(legs, registry, result)
     _pair(legs, registry.match, result)
     pair_fuzzy(legs, registry, result)
