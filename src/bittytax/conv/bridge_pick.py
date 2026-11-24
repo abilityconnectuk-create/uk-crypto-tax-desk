@@ -12,6 +12,7 @@ from .pairing import (  # pylint: disable=cyclic-import
     _asset,
     _bridge_evidence,
     _chain,
+    _collectible_leg,
     _gap,
     _leg_value,
     _merge_exchange,
@@ -24,8 +25,6 @@ from .pairing import (  # pylint: disable=cyclic-import
 )
 from .txref import hashes_equal
 from .wallets import WalletRegistry
-
-_SEPARATE = frozenset({"USDT", "USDC"})
 
 
 def pair_bridges(
@@ -74,7 +73,7 @@ def _closest_bridge_in(
             continue
         if assets_compatible(_asset(out.row, "out"), _asset(leg.row, "in"), registry.match):
             same.append(leg)
-        elif not _kept_separate(out, leg):
+        else:
             changed.append(leg)
     pool = same or changed
     if not pool:
@@ -94,18 +93,24 @@ def _bridge_candidate(out: TransferLeg, incoming: TransferLeg, registry: WalletR
         return False
     if _gap(out, incoming) > registry.match.bridge_window:
         return False
-    if not _value_or_amount(out, incoming, registry):
+    if not _reachable(out, incoming, registry):
         return False
-    if _kept_separate(out, incoming):
-        return False
-    return _reachable(out, incoming, registry)
+    same = assets_compatible(_asset(out.row, "out"), _asset(incoming.row, "in"), registry.match)
+    if same:
+        return _values_close(out, incoming, registry) or amounts_match(
+            out.row, incoming.row, registry.match
+        )
+    return _token_change(out, incoming, registry)
 
 
-def _value_or_amount(out: TransferLeg, incoming: TransferLeg, registry: WalletRegistry) -> bool:
-    """Local value within tolerance covers a bridge fee. Quantity still counts."""
-    if _values_close(out, incoming, registry):
-        return True
-    return amounts_match(out.row, incoming.row, registry.match)
+def _token_change(out: TransferLeg, incoming: TransferLeg, registry: WalletRegistry) -> bool:
+    """Both local values must be known, non-zero, and within tolerance.
+
+    A similar quantity does not qualify, and a marked token name is not a fungible in-leg.
+    """
+    if _collectible_leg(incoming):
+        return False
+    return _values_close(out, incoming, registry)
 
 
 def _values_close(out: TransferLeg, incoming: TransferLeg, registry: WalletRegistry) -> bool:
@@ -116,12 +121,6 @@ def _values_close(out: TransferLeg, incoming: TransferLeg, registry: WalletRegis
     settings = registry.match
     limit = max(left, right) * settings.amount_tolerance + settings.amount_tolerance_abs
     return abs(left - right) <= limit
-
-
-def _kept_separate(out: TransferLeg, incoming: TransferLeg) -> bool:
-    left = _asset(out.row, "out").strip().upper()
-    right = _asset(incoming.row, "in").strip().upper()
-    return left in _SEPARATE and right in _SEPARATE and left != right
 
 
 def _reachable(out: TransferLeg, incoming: TransferLeg, registry: WalletRegistry) -> bool:

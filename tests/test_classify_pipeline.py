@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 
 from test_transfer_match import BASE, LEDGER, OTHER, PAYEE, _actions, _make, _payee, _registry, _run
 
@@ -151,8 +152,10 @@ def test_same_token_bridge_is_a_transfer_and_a_different_token_is_an_exchange() 
     assert received.t_record is not None and received.t_record.t_type is TrType.DEPOSIT
     assert "bridge-transfer" in _actions(result)
 
-    out = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Exchange", chain="ethereum")
-    incoming = _make(TrType.GIFT_RECEIVED, BASE, "USDC", "1", "Ledger", chain="arbitrum")
+    out = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Exchange", chain="ethereum", value="100")
+    incoming = _make(
+        TrType.GIFT_RECEIVED, BASE, "USDC", "1", "Ledger", chain="arbitrum", value="100"
+    )
     out.row_dict["Description"] = "bridge out"
     incoming.row_dict["Description"] = "bridge in"
     swapped = _run(out, incoming)
@@ -252,7 +255,7 @@ def test_bridge_keeps_usdt_and_usdc_apart_and_a_token_change_is_an_exchange() ->
     assert "bridge-transfer" in _actions(result)
     assert "bridge-exchange" not in _actions(result)
 
-    changed = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Exchange", chain="ethereum")
+    changed = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Exchange", chain="ethereum", value="100")
     bought = _make(
         TrType.GIFT_RECEIVED,
         BASE + timedelta(hours=1),
@@ -260,6 +263,7 @@ def test_bridge_keeps_usdt_and_usdc_apart_and_a_token_change_is_an_exchange() ->
         "1",
         "Ledger",
         chain="arbitrum",
+        value="100",
     )
     changed.row_dict["Description"] = "bridge out"
     bought.row_dict["Description"] = "bridge in"
@@ -402,6 +406,100 @@ def test_bridge_matches_on_value_when_the_input_has_no_chain_column() -> None:
     assert changed.t_record is not None and changed.t_record.t_type is TrType.TRADE
     assert changed.t_record.buy_asset == "USDC"
     assert "bridge-exchange" in _actions(swapped)
+
+
+def test_usdt_to_usdc_bridge_is_an_exchange_and_same_asset_still_wins() -> None:
+    sent = _make(TrType.GIFT_SENT, BASE, "USDT", "1500", "Exchange", chain="ethereum", value="1500")
+    received = _make(
+        TrType.GIFT_RECEIVED,
+        BASE + timedelta(hours=2),
+        "USDC",
+        "1490",
+        "Ledger",
+        chain="arbitrum",
+        value="1490",
+    )
+    sent.row_dict["Description"] = "bridge out"
+    result = _run(sent, received)
+    assert sent.t_record is not None and sent.t_record.t_type is TrType.TRADE
+    assert sent.t_record.buy_asset == "USDC"
+    assert sent.t_record.buy_quantity == Decimal("1490")
+    assert received.t_record is None
+    assert "bridge-exchange" in _actions(result)
+
+    out = _make(TrType.GIFT_SENT, BASE, "USDT", "1500", "Exchange", chain="ethereum", value="1500")
+    same = _make(
+        TrType.GIFT_RECEIVED,
+        BASE + timedelta(minutes=30),
+        "USDT",
+        "1495",
+        "Ledger",
+        chain="arbitrum",
+        value="1495",
+    )
+    other = _make(
+        TrType.GIFT_RECEIVED,
+        BASE + timedelta(hours=3),
+        "USDC",
+        "1490",
+        "Ledger",
+        chain="arbitrum",
+        value="1490",
+    )
+    out.row_dict["Description"] = "bridge out"
+    preferred = _run(out, same, other)
+    assert out.t_record is not None and out.t_record.t_type is TrType.WITHDRAWAL
+    assert same.t_record is not None and same.t_record.t_type is TrType.DEPOSIT
+    assert other.t_record is not None and other.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert "bridge-transfer" in _actions(preferred)
+    assert "bridge-exchange" not in _actions(preferred)
+
+
+def test_token_change_ignores_a_receive_with_no_value() -> None:
+    for symbol in ("CHARLIE", "VECARV", "X402"):
+        sent = _make(
+            TrType.GIFT_SENT,
+            BASE,
+            "USDT",
+            "995.53",
+            "Exchange",
+            chain="ethereum",
+            value="995.53",
+        )
+        incoming = _make(
+            TrType.GIFT_RECEIVED,
+            BASE + timedelta(hours=1),
+            symbol,
+            "1000",
+            "Ledger",
+            chain="arbitrum",
+            value="0",
+        )
+        sent.row_dict["Description"] = "bridge out"
+        result = _run(sent, incoming)
+        assert sent.t_record is not None and sent.t_record.t_type == NEEDS_REVIEW_TYPE
+        assert sent.t_record.t_type is not TrType.TRADE
+        assert "missing destination-chain deposit" in sent.t_record.note
+        assert result.queue[0].disposition == "missing-destination"
+        assert incoming.t_record is not None and incoming.t_record.buy_asset == symbol
+
+    marked = _make(
+        TrType.GIFT_SENT, BASE, "USDT", "995.53", "Exchange", chain="ethereum", value="995.53"
+    )
+    token = _make(
+        TrType.GIFT_RECEIVED,
+        BASE + timedelta(hours=1),
+        "TEDDY BEARS #12",
+        "1",
+        "Ledger",
+        chain="arbitrum",
+        value="995.53",
+    )
+    marked.row_dict["Description"] = "bridge out"
+    held = _run(marked, token)
+    assert marked.t_record is not None and marked.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert marked.t_record.t_type is not TrType.TRADE
+    assert held.queue[0].disposition == "missing-destination"
 
 
 def test_payee_stays_a_disposal() -> None:
