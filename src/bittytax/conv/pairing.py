@@ -47,6 +47,9 @@ _CONTRACT_KEYS = (
 _BUILTIN_LP_SYMBOLS = frozenset({"SLP", "BPT", "UNI-V2"})
 _BUILTIN_LP_PATTERNS = ("-lp", "lp-", "/lp", "_lp", "uni-v2", "receipt")
 _CONTRACT_IN_NAME = re.compile(r"\((0x[0-9a-fA-F]{8,})\)")
+_FEE_WORD = re.compile(r"\b(fee|gas)\b")
+_DUST_RATIO = Decimal(20)
+_DUST_QTY = Decimal("0.01")
 _EXPLICIT_TAGS = {"gift", "lost", "donation", "cost"}
 _MARGIN_TYPES = (
     TrType.MARGIN_GAIN,
@@ -272,7 +275,11 @@ def pair_bridges(
 def pair_same_wallet_swaps(
     legs: Sequence[TransferLeg], registry: WalletRegistry, result: ReconcileResult
 ) -> None:
-    """Pair a blank-destination swap on one wallet. Off unless the setting is on."""
+    """Pair a blank-destination swap on one wallet. Off unless the setting is on.
+
+    A dust or fee leg is ignored. The match prefers a similar local value, so a
+    fee of 0.004 cannot win just because its token count is closer.
+    """
     if not registry.match.same_wallet_swaps:
         return
     incoming = [leg for leg in legs if leg.direction == "in" and leg.eligible and not leg.consumed]
@@ -280,9 +287,11 @@ def pair_same_wallet_swaps(
     for out in legs:
         if out.direction != "out" or not out.eligible or out.consumed:
             continue
-        if not _blank_destination(out.row):
+        if not _blank_destination(out.row) or not _swap_in_scope(out.row, registry):
             continue
-        chosen = _closest(out, index.by_hash(out), registry, _same_wallet_swap_candidate)
+        if _dust_or_fee(out, legs):
+            continue
+        chosen = _best_same_wallet_in(out, index.by_hash(out), legs, registry)
         if chosen is None:
             continue
         if _lp_looking(out, chosen, registry):
@@ -582,6 +591,97 @@ def _bridge_candidate(out: TransferLeg, incoming: TransferLeg, registry: WalletR
         or hashes_equal(_tx_hash(out.row), _tx_hash(incoming.row))
         or _chains_differ(out.row, incoming.row)
     )
+
+
+def _best_same_wallet_in(
+    out: TransferLeg,
+    incoming: Sequence[TransferLeg],
+    legs: Sequence[TransferLeg],
+    registry: WalletRegistry,
+) -> Optional[TransferLeg]:
+    chosen: Optional[TransferLeg] = None
+    chosen_key: Optional[Tuple[Decimal, timedelta]] = None
+    for leg in incoming:
+        if leg.consumed or leg.row is out.row:
+            continue
+        if not _same_wallet_swap_candidate(out, leg, registry):
+            continue
+        if not _swap_in_scope(leg.row, registry) or _dust_or_fee(leg, legs):
+            continue
+        key = _swap_rank(out, leg)
+        if chosen_key is None or key < chosen_key:
+            chosen = leg
+            chosen_key = key
+    return chosen
+
+
+def _swap_rank(out: TransferLeg, incoming: TransferLeg) -> Tuple[Decimal, timedelta]:
+    out_value = _leg_value(out)
+    in_value = _leg_value(incoming)
+    if out_value is not None and in_value is not None and out_value > 0:
+        return (abs(out_value - in_value) / out_value, _gap(out, incoming))
+    return (-_leg_quantity(incoming), _gap(out, incoming))
+
+
+def _dust_or_fee(leg: TransferLeg, legs: Sequence[TransferLeg]) -> bool:
+    """A fee word, a tiny same-side leg, or a much smaller local value."""
+    if _FEE_WORD.search(_text(leg.row)):
+        return True
+    quantity = _leg_quantity(leg)
+    if quantity <= 0:
+        return True
+    asset = _asset(leg.row, leg.direction).strip().upper()
+    value = _leg_value(leg)
+    for other in _hash_siblings(leg, legs):
+        if other is leg:
+            continue
+        other_qty = _leg_quantity(other)
+        other_asset = _asset(other.row, other.direction).strip().upper()
+        tiny_side = (
+            other.direction == leg.direction
+            and quantity < _DUST_QTY
+            and other_qty >= quantity * _DUST_RATIO
+        )
+        same_asset = other_asset == asset and other_qty >= quantity * _DUST_RATIO
+        if tiny_side or same_asset:
+            return True
+        other_value = _leg_value(other)
+        if value is not None and value > 0 and other_value is not None:
+            if other_value >= value * _DUST_RATIO:
+                return True
+    return False
+
+
+def _hash_siblings(leg: TransferLeg, legs: Sequence[TransferLeg]) -> List[TransferLeg]:
+    digest = normalise_tx_hash(_tx_hash(leg.row))
+    if not digest:
+        return [leg]
+    return [item for item in legs if normalise_tx_hash(_tx_hash(item.row)) == digest]
+
+
+def _swap_in_scope(row: DataRow, registry: WalletRegistry) -> bool:
+    """Wallet and chain lists both apply. An empty list does not restrict that side."""
+    wallets = registry.match.same_wallet_swap_wallets
+    chains = registry.match.same_wallet_swap_chains
+    if wallets and _record(row).wallet.strip().casefold() not in wallets:
+        return False
+    if chains and _chain(row).strip().casefold() not in chains:
+        return False
+    return True
+
+
+def _leg_quantity(leg: TransferLeg) -> Decimal:
+    record = _record(leg.row)
+    if leg.direction == "in":
+        return record.buy_quantity or Decimal(0)
+    return record.sell_quantity or Decimal(0)
+
+
+def _leg_value(leg: TransferLeg) -> Optional[Decimal]:
+    record = _record(leg.row)
+    if leg.direction == "in":
+        return record.buy_value
+    return record.sell_value
 
 
 def _same_wallet_swap_candidate(

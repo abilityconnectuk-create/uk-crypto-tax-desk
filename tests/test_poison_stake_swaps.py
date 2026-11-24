@@ -162,3 +162,65 @@ def test_same_wallet_blank_destination_swap_is_off_unless_configured() -> None:
     apart = _run(other, elsewhere, registry=registry)
     assert other.t_record is not None and other.t_record.t_type is not TrType.TRADE
     assert "same-wallet-swap" not in _actions(apart)
+
+
+def test_same_wallet_swap_ignores_a_fee_leg() -> None:
+    registry = _registry()
+    registry.match.same_wallet_swaps = True
+    fee_hash = "0x" + "ab" * 16
+    fee = _make(TrType.GIFT_SENT, BASE, "SUI", "0.004", "Ledger", tx_hash=fee_hash)
+    large = _make(TrType.GIFT_SENT, BASE, "USDC", "10000", "Ledger", tx_hash=fee_hash)
+    received = _make(TrType.GIFT_RECEIVED, BASE, "ETH", "3.5", "Ledger", tx_hash=fee_hash)
+    _run(fee, large, received, registry=registry)
+    assert large.t_record is not None and large.t_record.t_type is TrType.TRADE
+    assert large.t_record.buy_asset == "ETH"
+    assert large.t_record.buy_quantity == Decimal("3.5")
+    assert received.t_record is None
+    assert fee.t_record is not None and fee.t_record.t_type is not TrType.TRADE
+
+    other_hash = "0x" + "ef" * 16
+    sent = _make(TrType.GIFT_SENT, BASE, "ETH", "5", "Ledger", tx_hash=other_hash)
+    dust = _make(TrType.GIFT_RECEIVED, BASE, "SUI", "0.004", "Ledger", tx_hash=other_hash)
+    bought = _make(TrType.GIFT_RECEIVED, BASE, "USDC", "8000", "Ledger", tx_hash=other_hash)
+    _run(sent, dust, bought, registry=registry)
+    assert sent.t_record is not None and sent.t_record.t_type is TrType.TRADE
+    assert sent.t_record.buy_asset == "USDC"
+    assert sent.t_record.buy_quantity == Decimal("8000")
+    assert bought.t_record is None
+    assert dust.t_record is not None and dust.t_record.t_type is not TrType.TRADE
+
+
+def test_same_wallet_swaps_can_be_limited_to_a_wallet_or_chain() -> None:
+    sui_hash = "0x" + "11" * 16
+    eth_hash = "0x" + "22" * 16
+    by_chain = _registry()
+    by_chain.match.same_wallet_swaps = True
+    by_chain.match.same_wallet_swap_chains = ("sui",)
+    sui_out = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Ledger", tx_hash=sui_hash, chain="sui")
+    sui_in = _make(
+        TrType.GIFT_RECEIVED, BASE, "USDC", "100", "Ledger", tx_hash=sui_hash, chain="sui"
+    )
+    eth_out = _make(
+        TrType.GIFT_SENT, BASE, "ETH", "1", "Ledger", tx_hash=eth_hash, chain="ethereum"
+    )
+    eth_in = _make(
+        TrType.GIFT_RECEIVED, BASE, "USDC", "100", "Ledger", tx_hash=eth_hash, chain="ethereum"
+    )
+    _run(sui_out, sui_in, eth_out, eth_in, registry=by_chain)
+    assert sui_out.t_record is not None and sui_out.t_record.t_type is TrType.TRADE
+    assert eth_out.t_record is not None and eth_out.t_record.t_type is not TrType.TRADE
+
+    by_wallet = _registry()
+    by_wallet.match.same_wallet_swaps = True
+    by_wallet.match.same_wallet_swap_wallets = ("ledger",)
+    kept = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Ledger", tx_hash=sui_hash, chain="sui")
+    kept_in = _make(
+        TrType.GIFT_RECEIVED, BASE, "USDC", "100", "Ledger", tx_hash=sui_hash, chain="sui"
+    )
+    other = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Other", tx_hash=eth_hash, chain="sui")
+    other_in = _make(
+        TrType.GIFT_RECEIVED, BASE, "USDC", "100", "Other", tx_hash=eth_hash, chain="sui"
+    )
+    _run(kept, kept_in, other, other_in, registry=by_wallet)
+    assert kept.t_record is not None and kept.t_record.t_type is TrType.TRADE
+    assert other.t_record is not None and other.t_record.t_type is not TrType.TRADE

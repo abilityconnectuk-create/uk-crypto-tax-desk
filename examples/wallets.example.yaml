@@ -44,8 +44,15 @@ match:
   share_pools: false
   # Off by default. When true, two legs on the same wallet that share a tx hash,
   # name different assets, and have a blank destination become one trade.
+  # A dust or fee leg, such as 0.004 of the gas token, is not the swap.
   # An LP or receipt token stays on the review queue.
   same_wallet_swaps: false
+  # Used only when same_wallet_swaps is true. Empty means every wallet or chain.
+  # A row has to match every list you set. These names are samples.
+  same_wallet_swap_wallets:
+    - Ledger
+  same_wallet_swap_chains:
+    - sui
 
 # Symbols that may be two sides of one internal move. The first symbol is the
 # shared pool name when match.share_pools is true. Otherwise symbols are not rewritten.
@@ -183,6 +190,32 @@ reconcile:
 count_exceptions:
   - reason: sample bot wallet excluded from the count
     wallet: Example Bot
+
+# Stablecoin sent to one of these payees is a disposal at pool cost. The local
+# value is held as a pending allocation. It is not a spend and not a trade.
+# assets defaults to USDT and USDC when omitted. A refund names one payment.
+# These addresses are fake.
+allocations:
+  - label: Example sale
+    chain: ethereum
+    payees:
+      - "0x0000000000000000000000000000000000000c01"
+    assets:
+      - USDT
+      - USDC
+    refunds:
+      - payment: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        refund: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+# Manual only. Payments and claim rows are hashes or ids. The pending value is
+# split across the claims by quantity. Unlisted lots stay pending.
+allocation_links:
+  - payments:
+      - "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    asset: WIDGET
+    claims:
+      - "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      - "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 
 # Leftovers the integrity check may ignore. Reason is required.
 # A tx_hash, or a date plus asset plus amount, is required.

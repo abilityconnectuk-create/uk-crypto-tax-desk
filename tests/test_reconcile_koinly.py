@@ -123,6 +123,7 @@ def test_reconciliation_passes_and_y4_does_not_fail_the_report(tmp_path: Path) -
         review_rows="conservative",
     )
     assert report["passed"] is True
+    assert not report["pending_allocations"]
     assert report["review_rows"] == "conservative"
     assert report["checks"]["Y4"]["affects_result"] is False
     assert report["checks"]["Y4"]["rows"][0]["engine_missing_cost"] == "3"

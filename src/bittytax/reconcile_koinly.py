@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 import dateutil.parser
 
 from .config import config
+from .conv.allocations import pending_allocations
 from .conv.wallets import load_wallet_registry
 from .review_queue import (
     QueueItem,
@@ -140,6 +141,8 @@ _ENGINE_BUCKETS = {
     "Lost": "disposal",
     "Gift-Received": "acquisition",
     "Review-Acquisition": "acquisition",
+    "Allocation": "allocation",
+    "Allocation-Claim": "acquisition",
     "_Needs-Review": "review",
 }
 
@@ -245,6 +248,7 @@ def build_report(
         ],
         "notes": pack.notes,
         "checks": checks,
+        "pending_allocations": pending_allocations(records_path),
     }
 
 

@@ -2,7 +2,7 @@
 
 import csv
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional, Sequence, Tuple, Union
@@ -11,6 +11,7 @@ from ..bt_types import TrType, UnmappedType
 from ..constants import TZ_UTC
 from .datarow import DataRow
 from .out_record import TransactionOutRecord
+from .reconcile_types import ReconcileResult, ReviewRow, SummaryRow
 from .txref import hashes_equal, is_confusable_official, related_official
 from .wallets import (
     MatchSettings,
@@ -56,39 +57,6 @@ _REVIEW_NOTE = "review row treated as"
 
 
 @dataclass
-class SummaryRow:
-    action: str
-    timestamp: datetime
-    asset: str
-    quantity: Decimal
-    wallet: str
-    destination: str
-    tx_hash: str
-    detail: str
-
-
-@dataclass
-class ReviewRow:
-    timestamp: datetime
-    asset: str
-    quantity: Decimal
-    wallet: str
-    destination: str
-    tx_hash: str
-    description: str
-    disposition: str
-
-
-@dataclass
-class ReconcileResult:
-    summary: List[SummaryRow] = field(default_factory=list)
-    review: List[ReviewRow] = field(default_factory=list)
-    spam: List[ReviewRow] = field(default_factory=list)
-    queue: List[ReviewRow] = field(default_factory=list)
-    match_seq: int = 0
-
-
-@dataclass
 class TransferLeg:
     row: DataRow
     direction: str
@@ -125,6 +93,10 @@ def reconcile_transfers(
     result = ReconcileResult()
     # Imported here so this module can finish loading before the pairing rules
     # import it back.
+    from .allocations import (  # pylint: disable=import-outside-toplevel
+        apply_allocation_links,
+        mark_allocation_payments,
+    )
     from .pairing import (  # pylint: disable=import-outside-toplevel,cyclic-import
         classify_before_pair,
         flag_unresolved,
@@ -137,6 +109,7 @@ def reconcile_transfers(
     )
 
     classify_before_pair(rows, registry, result)
+    mark_allocation_payments(rows, registry, result)
     legs = [leg for leg in (_leg_for(row, registry) for row in rows) if leg is not None]
     pair_by_hash(legs, registry, result)
     pair_cex_chain(legs, registry, result)
@@ -147,6 +120,7 @@ def reconcile_transfers(
     pair_fuzzy(legs, registry, result)
     flag_unresolved(legs, registry, result)
     _finish_unmatched(legs, legacy_gifts, review_as, result, registry)
+    apply_allocation_links(rows, registry, result)
     if registry.match.share_pools:
         _share_pools(rows, containers, registry.match, result)
     return result

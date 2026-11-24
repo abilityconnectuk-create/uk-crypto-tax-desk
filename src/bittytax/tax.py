@@ -503,7 +503,10 @@ class TaxCalculator:  # pylint: disable=too-many-instance-attributes
             pool_qty = self.holdings[t.asset].quantity
             pool_cost = self.holdings[t.asset].cost
             removed, cost, fees, shortfall = self._capped_pool_cost(t)
-            if shortfall > 0:
+            # An allocation keeps the local value on the row. A short pool must
+            # not rewrite that value down to the pool cost, and must not store
+            # the shortfall as a missing cost equal to the market value.
+            if shortfall > 0 and t.t_type is not TrType.ALLOCATION:
                 self._record_missing_cost(t, shortfall, pool_qty, pool_cost)
 
         self.holdings[t.asset].subtract_tokens(removed, cost, fees, t.t_type is TrType.WITHDRAWAL)

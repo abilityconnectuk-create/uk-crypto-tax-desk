@@ -64,6 +64,10 @@ class MatchSettings:  # pylint: disable=too-many-instance-attributes
     blocked_patterns: Tuple[str, ...] = ()
     # Off until the user opts in. A blank-destination exchange row is not a trade by itself.
     same_wallet_swaps: bool = False
+    # Empty means every wallet. Compared after case folding.
+    same_wallet_swap_wallets: Tuple[str, ...] = ()
+    # Empty means every chain. A row with no chain is outside a non-empty list.
+    same_wallet_swap_chains: Tuple[str, ...] = ()
 
 
 @dataclass
@@ -118,6 +122,34 @@ class CountException:
     tx_hash: str = ""
 
 
+@dataclass
+class AllocationRefund:
+    """An incoming payment that reduces one named outgoing payment."""
+
+    payment: str
+    refund: str
+
+
+@dataclass
+class AllocationRule:
+    """Sends of the listed assets to these payees stay pending until a manual link."""
+
+    label: str
+    chain: str = ""
+    payees: Tuple[str, ...] = ()
+    assets: Tuple[str, ...] = ("USDT", "USDC")
+    refunds: Tuple[AllocationRefund, ...] = ()
+
+
+@dataclass
+class AllocationLink:
+    """Named payments become the received token's cost. Nothing is inferred."""
+
+    payments: Tuple[str, ...]
+    asset: str
+    claims: Tuple[str, ...]
+
+
 def _default_utilities() -> List[UtilityRule]:
     return [
         UtilityRule("launchpool", "income"),
@@ -159,6 +191,8 @@ class WalletRegistry:  # pylint: disable=too-many-instance-attributes
     count_exceptions: List[CountException] = field(default_factory=list)
     # None means the reconciliation command uses its built-in official names.
     asset_names: Optional[Dict[str, Tuple[str, ...]]] = None
+    allocations: List[AllocationRule] = field(default_factory=list)
+    allocation_links: List[AllocationLink] = field(default_factory=list)
 
 
 _TOP_LEVEL = {
@@ -181,6 +215,8 @@ _TOP_LEVEL = {
     "count_exceptions",
     "review_exceptions",
     "asset_names",
+    "allocations",
+    "allocation_links",
 }
 _ADDRESS_CATEGORIES = {"transfer-to-venue", "swap", "lp", "collateral", "stake", "bridge"}
 _UTILITY_TREATMENTS = {"income", "dust", "ignore"}
@@ -203,6 +239,8 @@ _MATCH_KEYS = {
     "amount_tolerance_abs",
     "share_pools",
     "same_wallet_swaps",
+    "same_wallet_swap_wallets",
+    "same_wallet_swap_chains",
     "fuzzy_window_hours",
     "cex_window_hours",
     "bridge_window_hours",
@@ -268,6 +306,10 @@ def load_wallet_registry(path: str) -> WalletRegistry:
         registry.count_exceptions = _load_count_exceptions(loaded.get("count_exceptions"))
     if "asset_names" in loaded:
         registry.asset_names = _load_asset_names(loaded.get("asset_names"))
+    if "allocations" in loaded:
+        registry.allocations = _load_allocations(loaded.get("allocations"))
+    if "allocation_links" in loaded:
+        registry.allocation_links = _load_allocation_links(loaded.get("allocation_links"))
     return registry
 
 
@@ -420,6 +462,18 @@ def _load_match(value: object) -> MatchSettings:
         settings.share_pools = _parse_bool(item["share_pools"], "share_pools")
     if "same_wallet_swaps" in item:
         settings.same_wallet_swaps = _parse_bool(item["same_wallet_swaps"], "same_wallet_swaps")
+    if "same_wallet_swap_wallets" in item:
+        settings.same_wallet_swap_wallets = tuple(
+            name.casefold()
+            for name in _string_list(
+                item.get("same_wallet_swap_wallets"), "same_wallet_swap_wallets"
+            )
+        )
+    if "same_wallet_swap_chains" in item:
+        settings.same_wallet_swap_chains = tuple(
+            name.casefold()
+            for name in _string_list(item.get("same_wallet_swap_chains"), "same_wallet_swap_chains")
+        )
     if "fuzzy_window_hours" in item:
         settings.fuzzy_window = _window_from_hours(item["fuzzy_window_hours"], "fuzzy_window_hours")
     if "cex_window_hours" in item:
@@ -806,3 +860,85 @@ def _load_count_exceptions(value: object) -> List[CountException]:
             )
         rows.append(CountException(reason=reason, wallet=wallet, tx_hash=tx_hash))
     return rows
+
+
+def _load_allocations(value: object) -> List[AllocationRule]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise WalletRegistryError("allocations must be a list")
+    rules = []
+    for index, raw in enumerate(value, start=1):
+        rules.append(_load_one_allocation(raw, index))
+    return rules
+
+
+def _load_one_allocation(raw: object, index: int) -> AllocationRule:
+    where = f"allocations[{index}]"
+    item = _require_mapping(raw, where)
+    unknown = set(item) - {"label", "chain", "payees", "assets", "refunds"}
+    if unknown:
+        names = ", ".join(sorted(str(name) for name in unknown))
+        raise WalletRegistryError(f"{where} has unknown keys: {names}")
+    label = _optional_str(item, "label", where)
+    payees = tuple(_string_list(item.get("payees"), f"{where}.payees"))
+    if not label or not payees:
+        raise WalletRegistryError(f"{where} needs a label and at least one payee address")
+    if "assets" in item:
+        assets = tuple(
+            symbol.upper() for symbol in _string_list(item.get("assets"), f"{where}.assets")
+        )
+    else:
+        assets = ("USDT", "USDC")
+    if not assets:
+        raise WalletRegistryError(f"{where}.assets needs at least one symbol")
+    refunds = _load_refunds(item.get("refunds"), where)
+    return AllocationRule(
+        label=label,
+        chain=_optional_str(item, "chain", where),
+        payees=payees,
+        assets=assets,
+        refunds=tuple(refunds),
+    )
+
+
+def _load_refunds(value: object, where: str) -> List[AllocationRefund]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise WalletRegistryError(f"{where}.refunds must be a list")
+    rows = []
+    for index, raw in enumerate(value, start=1):
+        item = _require_mapping(raw, f"{where}.refunds[{index}]")
+        unknown = set(item) - {"payment", "refund"}
+        if unknown:
+            names = ", ".join(sorted(str(name) for name in unknown))
+            raise WalletRegistryError(f"{where}.refunds[{index}] has unknown keys: {names}")
+        payment = _optional_str(item, "payment", f"{where}.refunds[{index}]")
+        refund = _optional_str(item, "refund", f"{where}.refunds[{index}]")
+        if not payment or not refund:
+            raise WalletRegistryError(f"{where}.refunds[{index}] needs payment and refund")
+        rows.append(AllocationRefund(payment=payment, refund=refund))
+    return rows
+
+
+def _load_allocation_links(value: object) -> List[AllocationLink]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise WalletRegistryError("allocation_links must be a list")
+    links = []
+    for index, raw in enumerate(value, start=1):
+        where = f"allocation_links[{index}]"
+        item = _require_mapping(raw, where)
+        unknown = set(item) - {"payments", "asset", "claims"}
+        if unknown:
+            names = ", ".join(sorted(str(name) for name in unknown))
+            raise WalletRegistryError(f"{where} has unknown keys: {names}")
+        payments = tuple(_string_list(item.get("payments"), f"{where}.payments"))
+        claims = tuple(_string_list(item.get("claims"), f"{where}.claims"))
+        asset = _optional_str(item, "asset", where)
+        if not payments or not claims or not asset:
+            raise WalletRegistryError(f"{where} needs payments, an asset, and claims")
+        links.append(AllocationLink(payments=payments, asset=asset, claims=claims))
+    return links
