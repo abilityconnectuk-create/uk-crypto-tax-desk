@@ -108,6 +108,11 @@ def test_conservative_acquires_a_deposit_and_queues_a_withdrawal() -> None:
         TransactionRow.review_assumed_count = 0
         TransactionRow.skipped_unmapped_count = 0
         TransactionRow.skipped_ignored_count = 0
+        TransactionRow.needs_review_seen = 0
+        TransactionRow.review_imported_count = 0
+        TransactionRow.review_imported_trade_count = 0
+        TransactionRow.review_dropped_count = 0
+        TransactionRow.review_failed_count = 0
         TransactionRow.review_queue = []
 
 
@@ -134,6 +139,7 @@ def test_note_marks_a_row_already_rewritten_by_the_converter() -> None:
 def test_possible_spam_prints_one_summary(capsys: pytest.CaptureFixture[str]) -> None:
     TransactionRow.skipped_spam_count = 0
     TransactionRow.skipped_unmapped_count = 0
+    TransactionRow.needs_review_seen = 0
     importer = ImportRecords()
     try:
         for _ in range(3):
@@ -155,3 +161,51 @@ def test_possible_spam_prints_one_summary(capsys: pytest.CaptureFixture[str]) ->
     finally:
         TransactionRow.skipped_spam_count = 0
         TransactionRow.skipped_unmapped_count = 0
+        TransactionRow.needs_review_seen = 0
+
+
+def test_every_review_row_is_imported_or_counted(capsys: pytest.CaptureFixture[str]) -> None:
+    previous = config.review_rows
+    TransactionRow.review_assumed_count = 0
+    TransactionRow.skipped_unmapped_count = 0
+    TransactionRow.needs_review_seen = 0
+    TransactionRow.review_imported_count = 0
+    TransactionRow.review_imported_trade_count = 0
+    TransactionRow.review_dropped_count = 0
+    TransactionRow.review_failed_count = 0
+    TransactionRow.review_queue = []
+    try:
+        config.config["review_rows"] = "conservative"
+        acquired = _parse(
+            "_Needs-Review",
+            **{"Buy Quantity": "1", "Buy Asset": "AAA", "Buy Value": "10"},
+        )
+        with pytest.raises(SkippedTransaction):
+            _parse("_Needs-Review", **{"Sell Quantity": "2", "Sell Asset": "AAA"})
+        with pytest.raises(SkippedTransaction):
+            _parse("_Needs-Review")
+        assert acquired.t_record is not None
+        assert acquired.t_record.t_type is TrType.REVIEW_ACQUISITION
+        totals = TransactionRow.review_reconciliation()
+        assert totals["seen"] == 3
+        assert totals["queued"] == 1
+        assert totals["imported_acquisitions"] == 1
+        assert totals["dropped"] == 1
+        assert totals["failed"] == 0
+        assert totals["accounted"] == totals["seen"]
+        assert _warn_review_rows() is True
+        summary = capsys.readouterr().out
+        assert "3 unknown-type row(s)" in summary
+        assert "1 left on the tax review queue" in summary
+        assert "1 imported as acquisitions" in summary
+        assert "1 dropped with no quantity" in summary
+    finally:
+        config.config["review_rows"] = previous
+        TransactionRow.review_assumed_count = 0
+        TransactionRow.skipped_unmapped_count = 0
+        TransactionRow.needs_review_seen = 0
+        TransactionRow.review_imported_count = 0
+        TransactionRow.review_imported_trade_count = 0
+        TransactionRow.review_dropped_count = 0
+        TransactionRow.review_failed_count = 0
+        TransactionRow.review_queue = []

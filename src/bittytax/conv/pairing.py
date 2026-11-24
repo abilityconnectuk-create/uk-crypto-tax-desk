@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 # Fork of BittyTax (AGPL-3.0). See LICENSE.
 
+from bisect import bisect_left, bisect_right
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Callable, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from ..bt_types import TrType, UnmappedType
 from ..config import config
@@ -26,10 +27,11 @@ from .txref import (
     hash_kind,
     hashes_equal,
     is_confusable_official,
+    normalise_tx_hash,
     redact_account_numbers,
     related_official,
 )
-from .wallets import AddressRule, WalletRegistry, find_entry
+from .wallets import AddressRule, MatchSettings, WalletRegistry, find_entry
 
 _DEST_KEYS = ("TxDest", "Receiving Wallet", "To Wallet (read-only)")
 _SRC_KEYS = ("TxSrc", "Sending Wallet", "From Wallet (read-only)")
@@ -62,18 +64,132 @@ def classify_before_pair(
         _classify_utility(row, registry, result)
 
 
+class LegIndex:
+    """Incoming legs keyed by hash, by asset, and by time.
+
+    Each outgoing leg then looks at the rows that can still match it, instead of
+    scanning every incoming leg.
+    """
+
+    def __init__(self, incoming: Sequence[TransferLeg], settings: MatchSettings) -> None:
+        self._settings = settings
+        self._by_hash: Dict[str, List[TransferLeg]] = {}
+        asset_stamps: Dict[str, List[datetime]] = {}
+        asset_legs: Dict[str, List[TransferLeg]] = {}
+        all_stamps: List[datetime] = []
+        all_legs: List[TransferLeg] = []
+        for leg in incoming:
+            digest = normalise_tx_hash(_tx_hash(leg.row))
+            if digest:
+                self._by_hash.setdefault(digest, []).append(leg)
+            stamp = _stamp(leg.row)
+            symbol = _asset(leg.row, "in").strip().upper()
+            asset_stamps.setdefault(symbol, []).append(stamp)
+            asset_legs.setdefault(symbol, []).append(leg)
+            all_stamps.append(stamp)
+            all_legs.append(leg)
+        self._asset_stamps = {}
+        self._asset_legs = {}
+        for symbol, stamps in asset_stamps.items():
+            ordered_stamps, ordered_legs = _sort_legs(stamps, asset_legs[symbol])
+            self._asset_stamps[symbol] = ordered_stamps
+            self._asset_legs[symbol] = ordered_legs
+        self._all_stamps, self._all_legs = _sort_legs(all_stamps, all_legs)
+
+    def by_hash(self, out: TransferLeg) -> List[TransferLeg]:
+        digest = normalise_tx_hash(_tx_hash(out.row))
+        if not digest:
+            return []
+        return self._by_hash.get(digest, [])
+
+    def asset_window(self, out: TransferLeg, window: timedelta) -> List[TransferLeg]:
+        symbols = _related_symbols(_asset(out.row, "out"), self._settings)
+        return self._collect(symbols, out, window)
+
+    def time_window(self, out: TransferLeg, window: timedelta) -> List[TransferLeg]:
+        stamp = _stamp(out.row)
+        return _slice(self._all_stamps, self._all_legs, stamp - window, stamp + window)
+
+    def _collect(
+        self, symbols: Sequence[str], out: TransferLeg, window: timedelta
+    ) -> List[TransferLeg]:
+        stamp = _stamp(out.row)
+        start = stamp - window
+        end = stamp + window
+        found: List[TransferLeg] = []
+        seen = set()
+        for symbol in symbols:
+            stamps = self._asset_stamps.get(symbol, [])
+            legs = self._asset_legs.get(symbol, [])
+            for leg in _slice(stamps, legs, start, end):
+                ident = id(leg)
+                if ident in seen:
+                    continue
+                seen.add(ident)
+                found.append(leg)
+        return found
+
+
+def _sort_legs(
+    stamps: Sequence[datetime], legs: Sequence[TransferLeg]
+) -> Tuple[List[datetime], List[TransferLeg]]:
+    paired = sorted(zip(stamps, legs), key=lambda item: item[0])
+    if not paired:
+        return [], []
+    ordered_stamps, ordered_legs = zip(*paired)
+    return list(ordered_stamps), list(ordered_legs)
+
+
+def _slice(
+    stamps: Sequence[datetime],
+    legs: Sequence[TransferLeg],
+    start: datetime,
+    end: datetime,
+) -> List[TransferLeg]:
+    left = bisect_left(stamps, start)
+    right = bisect_right(stamps, end)
+    return list(legs[left:right])
+
+
+def _related_symbols(asset: str, settings: MatchSettings) -> List[str]:
+    symbol = asset.strip().upper()
+    found = [symbol]
+    for group in settings.token_groups:
+        names = [item.upper() for item in group.all_symbols()]
+        if symbol not in names:
+            continue
+        for name in names:
+            if name not in found:
+                found.append(name)
+    return found
+
+
+def _union_legs(*groups: Sequence[TransferLeg]) -> List[TransferLeg]:
+    found: List[TransferLeg] = []
+    seen = set()
+    for group in groups:
+        for leg in group:
+            ident = id(leg)
+            if ident in seen:
+                continue
+            seen.add(ident)
+            found.append(leg)
+    return found
+
+
 def pair_by_hash(
     legs: Sequence[TransferLeg], registry: WalletRegistry, result: ReconcileResult
 ) -> None:
     """Pair legs that share a transaction hash after 0x and case normalisation."""
     incoming = [leg for leg in legs if leg.direction == "in" and leg.eligible and not leg.consumed]
+    index = LegIndex(incoming, registry.match)
     for out in legs:
         if out.direction != "out" or not out.eligible or out.consumed:
             continue
         raw = _tx_hash(out.row)
         if not raw:
             continue
-        chosen = _closest(out, incoming, registry, _hash_candidate)
+        chosen = _closest(out, index.by_hash(out), registry, _hash_candidate)
         if chosen is None:
             continue
         how = "tx hash normalised"
@@ -89,10 +205,13 @@ def pair_cex_chain(
 ) -> None:
     """Pair an exchange id with a chain hash when destination, amount and time agree."""
     incoming = [leg for leg in legs if leg.direction == "in" and leg.eligible and not leg.consumed]
+    index = LegIndex(incoming, registry.match)
     for out in legs:
         if out.direction != "out" or not out.eligible or out.consumed:
             continue
-        chosen = _closest(out, incoming, registry, _cex_candidate)
+        chosen = _closest(
+            out, index.asset_window(out, registry.match.cex_window), registry, _cex_candidate
+        )
         if chosen is None:
             continue
         record_transfer_pair(
@@ -109,12 +228,15 @@ def pair_bridges(
     legs: Sequence[TransferLeg], registry: WalletRegistry, result: ReconcileResult
 ) -> None:
     incoming = [leg for leg in legs if leg.direction == "in" and leg.eligible and not leg.consumed]
+    index = LegIndex(incoming, registry.match)
     for out in legs:
         if out.direction != "out" or not out.eligible or out.consumed:
             continue
         if not _bridge_evidence(out.row, registry):
             continue
-        chosen = _closest(out, incoming, registry, _bridge_candidate)
+        chosen = _closest(
+            out, index.time_window(out, registry.match.bridge_window), registry, _bridge_candidate
+        )
         if chosen is None:
             continue
         if assets_compatible(_asset(out.row, "out"), _asset(chosen.row, "in"), registry.match):
@@ -140,13 +262,15 @@ def pair_swaps(
     legs: Sequence[TransferLeg], registry: WalletRegistry, result: ReconcileResult
 ) -> None:
     incoming = [leg for leg in legs if leg.direction == "in" and leg.eligible and not leg.consumed]
+    index = LegIndex(incoming, registry.match)
     for out in legs:
         if out.direction != "out" or not out.eligible or out.consumed:
             continue
         rule = _rule_on(out.row, registry, "swap", "out")
         if rule is None:
             continue
-        chosen = _closest(out, incoming, registry, _swap_candidate)
+        pool = _union_legs(index.time_window(out, registry.match.window), index.by_hash(out))
+        chosen = _closest(out, pool, registry, _swap_candidate)
         if chosen is None:
             continue
         _merge_exchange(out, chosen, result, "swap", f"swap via {rule.label}")
@@ -157,10 +281,14 @@ def pair_fuzzy(
 ) -> None:
     """Own-wallet match. At least two of hash, address, and amount-plus-time."""
     incoming = [leg for leg in legs if leg.direction == "in" and leg.eligible and not leg.consumed]
+    index = LegIndex(incoming, registry.match)
     for out in legs:
         if out.direction != "out" or not out.eligible or out.consumed:
             continue
-        chosen = _closest(out, incoming, registry, _fuzzy_candidate)
+        # The window depends on the incoming leg, so this uses the widest window.
+        chosen = _closest(
+            out, index.asset_window(out, registry.match.bridge_window), registry, _fuzzy_candidate
+        )
         if chosen is None:
             continue
         record_transfer_pair(

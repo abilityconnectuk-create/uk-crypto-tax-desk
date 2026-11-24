@@ -205,6 +205,8 @@ class ImportRecords:
                 bt_tqdm_write(f"{WARNING} {exc}")
         except TransactionParserError as exc:
             t_row.failure = exc
+            if t_row.review_outcome in ("acquisition", "trade"):
+                TransactionRow.review_failed_count += 1
 
         if config.debug or t_row.failure:
             bt_tqdm_write(f"{Fore.YELLOW}import: {t_row}")

@@ -191,7 +191,8 @@ def _run(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
 
     try:
         transaction_records = _do_import(args.filename)
-        _warn_review_rows()
+        if not _warn_review_rows():
+            parser.exit(1)
     except IOError:
         parser.exit(message=f"{ERROR} File could not be read: {args.filename}\n")
     except ImportFailureError:
@@ -222,8 +223,7 @@ def _run(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
                 _write_year_end_snapshot(args.year_end_snapshot, tax)
             if not args.skip_integrity:
                 int_passed = _do_integrity_check(audit, tax.holdings)
-                if not int_passed:
-                    parser.exit()
+                _exit_if_failed(parser, int_passed)
 
             _do_each_tax_year(tax, args.tax_year, args.summary_only)
 
@@ -297,7 +297,13 @@ def _write_report(
         )
 
 
-def _warn_review_rows() -> None:
+def _exit_if_failed(parser: argparse.ArgumentParser, passed: bool) -> None:
+    """Leave the process with status 1 when a check has failed."""
+    if not passed:
+        parser.exit(1)
+
+
+def _warn_review_rows() -> bool:
     count = TransactionRow.review_assumed_count
     skipped = TransactionRow.skipped_unmapped_count
     if count:
@@ -323,6 +329,31 @@ def _warn_review_rows() -> None:
             f"{WARNING} {spam} possible-spam transaction(s) were skipped. "
             "They are listed in the possible-spam file, not in this calculation."
         )
+    return _warn_review_reconciliation()
+
+
+def _warn_review_reconciliation() -> bool:
+    """Every unknown-type row is imported or listed. The counts must add up."""
+    totals = TransactionRow.review_reconciliation()
+    seen = totals["seen"]
+    if not seen:
+        return True
+    print(
+        f"{WARNING} review queue reconciliation: {seen} unknown-type row(s): "
+        f"{totals['queued']} left on the tax review queue, "
+        f"{totals['imported_acquisitions']} imported as acquisitions, "
+        f"{totals['imported_trades']} imported as trades, "
+        f"{totals['dropped']} dropped with no quantity, "
+        f"{totals['failed']} failed to import. "
+        f"Accounted {totals['accounted']}."
+    )
+    if totals["accounted"] != seen:
+        print(
+            f"{ERROR} review queue reconciliation does not add up "
+            f"({totals['accounted']} accounted, {seen} seen)."
+        )
+        return False
+    return True
 
 
 def _do_import(filename: str) -> List[TransactionRecord]:
@@ -330,6 +361,11 @@ def _do_import(filename: str) -> List[TransactionRecord]:
     TransactionRow.skipped_unmapped_count = 0
     TransactionRow.skipped_spam_count = 0
     TransactionRow.skipped_ignored_count = 0
+    TransactionRow.needs_review_seen = 0
+    TransactionRow.review_imported_count = 0
+    TransactionRow.review_imported_trade_count = 0
+    TransactionRow.review_dropped_count = 0
+    TransactionRow.review_failed_count = 0
     TransactionRow.review_queue = []
     import_records = ImportRecords()
 

@@ -1,10 +1,11 @@
+import argparse
 from datetime import datetime, timedelta
 from decimal import Decimal
 
 from test_transfer_match import BASE, LEDGER, OTHER, _make, _registry, _run
 
 from bittytax.audit import AuditRecords
-from bittytax.bittytax import _do_integrity_check
+from bittytax.bittytax import _do_integrity_check, _exit_if_failed
 from bittytax.bt_types import AssetSymbol, TaxRules, Timestamp, TrType
 from bittytax.config import config
 from bittytax.constants import TZ_UTC
@@ -92,6 +93,51 @@ def test_round_trip_does_not_inflate_the_5_april_pool() -> None:
     assert Decimal(eth["cost"]) == Decimal("2400")
     assert snapshot["currency"] == "USD"
     assert calculator.holdings[AssetSymbol("ETH")].quantity == Decimal("2.41")
+
+
+def test_snapshot_includes_every_asset_and_the_final_year() -> None:
+    previous = config.ccy
+    config.ccy = "USD"
+    try:
+        first = _asset_buy("AAA", "1", "10", datetime(2024, 6, 1, 12, tzinfo=TZ_UTC))
+        late = _asset_buy("ZZZ", "100", "5000", datetime(2024, 7, 1, 12, tzinfo=TZ_UTC))
+        second = _asset_buy("AAA", "1", "20", datetime(2025, 6, 1, 12, tzinfo=TZ_UTC))
+        calculator = TaxCalculator([first, late, second], TaxRules.UK_INDIVIDUAL)
+        calculator.pool_same_day()
+        calculator.process_section104(True)
+        snapshot = calculator.snapshot_payload("conservative")
+    finally:
+        config.ccy = previous
+
+    year_2025 = {row["asset"]: row for row in snapshot["pools"]["2025"]["assets"]}
+    year_2026 = {row["asset"]: row for row in snapshot["pools"]["2026"]["assets"]}
+    assert Decimal(year_2025["AAA"]["quantity"]) == Decimal(1)
+    assert Decimal(year_2025["AAA"]["cost"]) == Decimal(10)
+    assert Decimal(year_2025["ZZZ"]["quantity"]) == Decimal(100)
+    assert Decimal(year_2025["ZZZ"]["cost"]) == Decimal(5000)
+    assert Decimal(year_2026["AAA"]["quantity"]) == Decimal(2)
+    assert Decimal(year_2026["AAA"]["cost"]) == Decimal(30)
+    assert Decimal(year_2026["ZZZ"]["quantity"]) == Decimal(100)
+    assert snapshot["pools"]["2025"]["as_of"] == "2025-04-05"
+    assert snapshot["pools"]["2026"]["as_of"] == "2026-04-05"
+
+
+def _asset_buy(asset: str, quantity: str, cost: str, when: datetime) -> Buy:
+    buy = Buy(TrType.TRADE, Decimal(quantity), AssetSymbol(asset), Decimal(cost))
+    buy.timestamp = Timestamp(when)
+    buy.tid = [int(when.timestamp()), 0]
+    return buy
+
+
+def test_integrity_failure_exits_nonzero() -> None:
+    parser = argparse.ArgumentParser(prog="bittytax")
+    try:
+        _exit_if_failed(parser, False)
+    except SystemExit as exc:
+        assert exc.code == 1
+    else:
+        raise AssertionError("integrity failure must exit")
+    _exit_if_failed(parser, True)
 
 
 def test_unmatched_withdrawal_fails_integrity_until_it_is_excepted() -> None:

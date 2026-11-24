@@ -162,6 +162,11 @@ class MarginReportTotal(TypedDict):  # pylint: disable=too-few-public-methods
     fee_rebates: Decimal
 
 
+def _section104_order(transaction: Union[Buy, Sell]) -> Tuple[Any, str, Any]:
+    """Time, then asset. Each asset keeps its own pool; the year boundary sees every asset."""
+    return (transaction.timestamp, str(transaction.asset), transaction.tid)
+
+
 class TaxCalculator:  # pylint: disable=too-many-instance-attributes
     INCOME_TYPES = (
         TrType.MINING,
@@ -432,8 +437,12 @@ class TaxCalculator:  # pylint: disable=too-many-instance-attributes
         if config.debug:
             print(f"{Fore.CYAN}process section 104")
 
+        # Time order, then asset. Asset order would close a year before a
+        # later asset's earlier buys had been applied, and the last year
+        # would never be recorded.
+        ordered = sorted(self._all_transactions(), key=_section104_order)
         for t in tqdm(
-            sorted(self._all_transactions()),
+            ordered,
             unit="t",
             desc=f"{Fore.CYAN}process section 104{Fore.GREEN}",
             disable=disable_tqdm(),
@@ -469,6 +478,8 @@ class TaxCalculator:  # pylint: disable=too-many-instance-attributes
                 self._add_tokens(t)
             elif isinstance(t, Sell):
                 self._subtract_tokens(t, skip_integrity_check)
+
+        self.year_end.close(self.holdings)
 
     def _add_tokens(self, t: Buy) -> None:
         if not t.acquisition:

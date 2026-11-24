@@ -121,6 +121,21 @@ official_assets:
   - BTC
   - ETH
 
+# Koinly prints "BTC (Bitcoin)". That label matches BTC. A different name in the
+# brackets, such as "BTC (Bear Trump Coin)", stays a separate asset.
+# Omit this block to use the same built-in names.
+asset_names:
+  BTC:
+    - Bitcoin
+    - BTC (Bitcoin)
+  ETH:
+    - Ethereum
+    - ETH (Ethereum)
+  USDT:
+    - Tether
+    - Tether USD
+    - USDT (Tether)
+
 reconcile:
   quantity_epsilon: "0.00000001"
   cost_band_ratio: "0.005"

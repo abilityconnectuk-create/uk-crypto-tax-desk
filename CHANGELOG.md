@@ -9,6 +9,16 @@ The price data cache format has been updated to correctly distinguish assets tha
 The new `price_via_btc` config option may not exist in your config file. If it is missing, BittyTax keeps the legacy BTC-intermediate behaviour for backward compatibility. Add `price_via_btc: False` to your config if you want historic prices to use direct local currency lookups.
 
 ### Fixed
+- Accounting tool: the 5 April Section 104 snapshot is taken in time order and includes the final open tax year, so a later-named asset bought only in an earlier year is not dropped.
+- Reconciliation: an ISO holdings title such as `2025-04-05 23:59` stays 5 April 2025 (tax year 2024/25) instead of being read as 4 May.
+- Reconciliation: `asset_names` maps an official Koinly label such as `BTC (Bitcoin)` onto `BTC`. A different name in the brackets is not merged.
+- Reconciliation: yearly income uses the value column before the token amount.
+- Reconciliation: net capital gains are compared with spot gains plus the margin net, because the Koinly capital-gains file includes futures.
+- Reconciliation: missing cost is taken from a numeric column, a Missing cost basis mark, or a zero or blank cost on a disposal.
+- Reconciliation: wallet and type counts follow the converter. A bulk-edit transfer is one trade on the To wallet. Income and margin tags are counted as income and margin.
+- Conversion tool: transfer pairing looks up candidates by asset and time window, and by transaction hash.
+- Accounting tool: a failed integrity check exits with status 1.
+- Accounting tool: every unknown-type row is imported or counted, and the warning reconciles those counts.
 - Koinly parser: amounts with thousands separators (for example 1,234.56) are parsed, and a local-currency amount keeps its quantity as the value after FX conversion.
 - Price tool: CoinGecko latest price returns no price when `current_price` is null, instead of failing the report.
 - Accounting tool: a disposal larger than the Section 104 pool no longer drives pool cost negative. Each short disposal is listed with both the missing cost (the pool average times the short quantity, or the market value when the pool was empty) and the proceeds of that quantity.

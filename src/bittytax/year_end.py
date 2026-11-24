@@ -58,6 +58,12 @@ class YearEndTracker:
             self.snapshots[closed] = _copy_holdings(holdings)
         self._open_year = year
 
+    def close(self, holdings: Mapping[Any, Any]) -> None:
+        """Snapshot the tax year that is still open after the last transaction."""
+        if self._open_year is None or self._open_year in self.snapshots:
+            return
+        self.snapshots[self._open_year] = _copy_holdings(holdings)
+
     def _flag(self, transaction: Any) -> None:
         timestamp = transaction.timestamp
         if timestamp.tzinfo is None:
@@ -88,6 +94,11 @@ def tax_year_of(day: datetime.date) -> int:
     if day > config.get_tax_year_end(day.year):
         return day.year + 1
     return day.year
+
+
+def tax_year_label(year: int) -> str:
+    """Label for the year ending 5 April. 2025 is 2024/25."""
+    return f"{year - 1}/{year % 100:02d}"
 
 
 def _as_london(timestamp: datetime.datetime) -> datetime.datetime:

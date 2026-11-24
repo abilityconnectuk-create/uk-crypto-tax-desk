@@ -140,6 +140,8 @@ class WalletRegistry:  # pylint: disable=too-many-instance-attributes
     tax_treatment: TaxTreatment = field(default_factory=TaxTreatment)
     reconcile: ReconcileSettings = field(default_factory=ReconcileSettings)
     count_exceptions: List[CountException] = field(default_factory=list)
+    # None means the reconciliation command uses its built-in official names.
+    asset_names: Optional[Dict[str, Tuple[str, ...]]] = None
 
 
 _TOP_LEVEL = {
@@ -158,6 +160,7 @@ _TOP_LEVEL = {
     "reconcile",
     "count_exceptions",
     "review_exceptions",
+    "asset_names",
 }
 _ADDRESS_CATEGORIES = {"transfer-to-venue", "swap", "lp", "collateral", "bridge"}
 _UTILITY_TREATMENTS = {"income", "dust", "ignore"}
@@ -237,6 +240,8 @@ def load_wallet_registry(path: str) -> WalletRegistry:
         registry.reconcile = _load_reconcile(loaded.get("reconcile"))
     if "count_exceptions" in loaded:
         registry.count_exceptions = _load_count_exceptions(loaded.get("count_exceptions"))
+    if "asset_names" in loaded:
+        registry.asset_names = _load_asset_names(loaded.get("asset_names"))
     return registry
 
 
@@ -655,6 +660,27 @@ def _load_reconcile(value: object) -> ReconcileSettings:
         if key in item:
             setattr(settings, key, _parse_tolerance(item[key], f"reconcile.{key}"))
     return settings
+
+
+def _load_asset_names(value: object) -> Dict[str, Tuple[str, ...]]:
+    item = _require_mapping(value, "asset_names")
+    names: Dict[str, Tuple[str, ...]] = {}
+    for symbol, aliases in item.items():
+        if not isinstance(symbol, str) or not symbol.strip():
+            raise WalletRegistryError("asset_names keys must be asset symbols")
+        if isinstance(aliases, str):
+            alias_list: List[object] = [aliases]
+        elif isinstance(aliases, list):
+            alias_list = list(aliases)
+        else:
+            raise WalletRegistryError(f"asset_names.{symbol} must be a list of names")
+        cleaned = []
+        for alias in alias_list:
+            if not isinstance(alias, str) or not alias.strip():
+                raise WalletRegistryError(f"asset_names.{symbol} names must be text")
+            cleaned.append(alias.strip())
+        names[symbol.strip().upper()] = tuple(cleaned)
+    return names
 
 
 def _load_count_exceptions(value: object) -> List[CountException]:

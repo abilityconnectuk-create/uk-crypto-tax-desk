@@ -23,7 +23,7 @@ from .review_queue import (
     load_review_exceptions,
     review_queue_failures,
 )
-from .year_end import tax_year_of
+from .year_end import tax_year_label, tax_year_of
 
 
 @dataclass
@@ -32,6 +32,7 @@ class HoldingSet:
     tax_year: str
     amounts: Dict[str, Decimal]
     costs: Dict[str, Decimal]
+    tax_year_label: str = ""
 
 
 @dataclass
@@ -57,6 +58,56 @@ class Desk:
     cost_band_abs: Decimal = Decimal(1)
     gains_band_ratio: Decimal = Decimal("0.01")
     income_abs: Decimal = Decimal("0.01")
+    # None uses the built-in official names. An empty dict maps nothing.
+    asset_names: Optional[Dict[str, Sequence[str]]] = None
+
+
+# Names Koinly prints next to the ticker. A different name in brackets is not one of these.
+_DEFAULT_ASSET_NAMES: Dict[str, Sequence[str]] = {
+    "BTC": ("Bitcoin", "BTC (Bitcoin)"),
+    "ETH": ("Ethereum", "ETH (Ethereum)"),
+    "USDT": ("Tether", "Tether USD", "USDT (Tether)"),
+}
+_INCOME_TAGS = {
+    "airdrop",
+    "fork",
+    "mining",
+    "reward",
+    "income",
+    "other income",
+    "lending interest",
+    "cashback",
+    "salary",
+    "staking",
+    "interest",
+}
+_MARGIN_TAGS = {
+    "realized gain",
+    "realized loss",
+    "margin fee",
+    "margin fee rebate",
+    "funding fee",
+    "funding",
+}
+_COUNTING_NOTES = (
+    "T1 and T2 follow the rows the Koinly converter writes. "
+    "A tax-report transfer is one withdrawal on the sending wallet and one deposit "
+    "on the receiving wallet. A buy, sell or exchange is one trade on a single wallet. "
+    "A bulk-edit row with both a from amount and a to amount is one trade on the "
+    "To wallet, including when its type says transfer. "
+    "Reward, income, airdrop, mining, salary and lending interest are income. "
+    "Realized gain and margin fee are margin. Those rows are not also counted as "
+    "deposits or withdrawals. A wallet name drops the id after a semicolon.",
+    "Y3 compares Koinly net capital gains, which include futures, with spot "
+    "capital gains plus the margin net.",
+    "Y4 missing cost uses a numeric missing-cost column when the file has one. "
+    "Otherwise a Missing cost basis indicator selects the lot, and the amount is "
+    "the proceeds, or the gain when proceeds are blank. With no indicator, a "
+    "disposal whose cost is zero or blank and whose proceeds are positive counts "
+    "for those proceeds. Y4 does not fail the report.",
+    "P1 and P2 map a Koinly label onto a symbol only when asset_names lists that "
+    "official name. BTC (Bitcoin) can match BTC. BTC (Bear Trump Coin) cannot.",
+)
 
 
 _ENGINE_BUCKETS = {
@@ -139,7 +190,7 @@ def build_report(
     desk = _load_desk(wallets_path)
     exceptions = load_review_exceptions(exceptions_path) if exceptions_path else []
     skip_wallets = {item.get("wallet", "") for item in desk.count_exceptions if item.get("wallet")}
-    pack = _read_pack(koinly_dir, skip_wallets)
+    pack = _read_pack(koinly_dir, skip_wallets, desk)
     engine = _read_engine(records_path)
     with open(snapshot_path, encoding="utf-8") as handle:
         snapshot = json.load(handle)
@@ -155,9 +206,7 @@ def build_report(
     checks["Y2"] = _check_year_total(
         pack, snapshot, "other", "margin_net", desk.income_abs, Decimal(0)
     )
-    checks["Y3"] = _check_year_total(
-        pack, snapshot, "gains", "capital_gains", Decimal(1), desk.gains_band_ratio
-    )
+    checks["Y3"] = _check_gains(pack, snapshot, desk)
     checks["Y4"] = _check_missing(pack, snapshot)
     checks["review_queue"] = _check_queue(queue_path, exceptions)
 
@@ -175,6 +224,15 @@ def build_report(
         "share_pools": desk.share_pools,
         "token_groups": desk.token_groups,
         "official_assets": desk.official_assets,
+        "asset_names": {symbol: list(aliases) for symbol, aliases in _active_names(desk).items()},
+        "holdings_as_of": [
+            {
+                "as_of": holding.as_of,
+                "tax_year": holding.tax_year,
+                "tax_year_label": holding.tax_year_label,
+            }
+            for holding in pack.holdings
+        ],
         "notes": pack.notes,
         "checks": checks,
     }
@@ -200,16 +258,15 @@ def _load_desk(path: str) -> Desk:
     desk.cost_band_abs = registry.reconcile.cost_band_abs
     desk.gains_band_ratio = registry.reconcile.gains_band_ratio
     desk.income_abs = registry.reconcile.income_abs
+    if registry.asset_names is not None:
+        desk.asset_names = {
+            symbol: list(aliases) for symbol, aliases in registry.asset_names.items()
+        }
     return desk
 
 
-def _read_pack(directory: str, skip_wallets: Set[str]) -> KoinlyPack:
-    pack = KoinlyPack(
-        notes=[
-            "Koinly transfer rows are counted as one withdrawal and one deposit, "
-            "because the converter writes both legs."
-        ]
-    )
+def _read_pack(directory: str, skip_wallets: Set[str], desk: Desk) -> KoinlyPack:
+    pack = KoinlyPack(notes=list(_COUNTING_NOTES))
     if not os.path.isdir(directory):
         raise FileNotFoundError(f"Koinly folder not found: {directory}")
     for name in sorted(os.listdir(directory)):
@@ -221,7 +278,7 @@ def _read_pack(directory: str, skip_wallets: Set[str]) -> KoinlyPack:
         if kind == "history":
             _consume_history(rows, pack, skip_wallets)
         elif kind == "holdings":
-            pack.holdings.append(_consume_holdings(rows))
+            pack.holdings.append(_consume_holdings(rows, desk))
         elif kind == "income":
             _add_totals(pack.income, _sum_by_year(rows, ("value", "income", "amount")))
         elif kind == "other":
@@ -373,6 +430,45 @@ def _check_year_total(
     return {"name": labels[pack_key], "passed": not failures, "failures": failures}
 
 
+def _check_gains(pack: KoinlyPack, snapshot: Mapping[str, Any], desk: Desk) -> Dict[str, Any]:
+    """The Koinly net figure includes futures. Compare it with spot gains plus margin."""
+    koinly = pack.gains
+    years = snapshot.get("years", {})
+    if not isinstance(years, dict):
+        years = {}
+    names = sorted(set(koinly) | set(years))
+    failures = []
+    for year in names:
+        left = koinly.get(year, Decimal(0))
+        block = years.get(year, {})
+        if not isinstance(block, dict):
+            block = {}
+        spot = _decimal(block.get("capital_gains", "0"))
+        margin = _decimal(block.get("margin_net", "0"))
+        right = spot + margin
+        band = max(Decimal(1), abs(left) * desk.gains_band_ratio)
+        if abs(left - right) > band:
+            failures.append(
+                {
+                    "tax_year": year,
+                    "koinly": f"{left:f}",
+                    "engine": f"{right:f}",
+                    "engine_spot": f"{spot:f}",
+                    "engine_margin": f"{margin:f}",
+                    "band": f"{band:f}",
+                }
+            )
+    return {
+        "name": "Y3 net capital gains",
+        "passed": not failures,
+        "failures": failures,
+        "definition": (
+            "Koinly net capital gains, including futures, compared with spot "
+            "capital gains plus the margin net."
+        ),
+    }
+
+
 def _check_missing(pack: KoinlyPack, snapshot: Mapping[str, Any]) -> Dict[str, Any]:
     rows = []
     years = snapshot.get("years", {})
@@ -393,6 +489,13 @@ def _check_missing(pack: KoinlyPack, snapshot: Mapping[str, Any]) -> Dict[str, A
         "name": "Y4 missing cost beside Koinly shortfall",
         "passed": True,
         "affects_result": False,
+        "definition": (
+            "A numeric missing-cost column is summed when every value in it is a number. "
+            "Otherwise a Missing cost basis mark of yes selects the lot, and the amount is "
+            "the proceeds, or the gain when proceeds are blank. With no mark, a disposal "
+            "whose cost is zero or blank and whose proceeds are positive counts for those "
+            "proceeds. This check does not fail the report."
+        ),
         "rows": rows,
     }
 
@@ -432,27 +535,14 @@ def _consume_history(
         return
     header = [cell.strip() for cell in rows[header_at]]
     index = {name.casefold(): pos for pos, name in enumerate(header)}
+    bulk = "from wallet (read-only)" in index or "from amount" in index
     for raw in rows[header_at + 1 :]:
         if _blank(raw) or _deleted(raw, index) or _skipped_wallet(raw, index, skip_wallets):
             continue
-        _count_wallet(pack.wallets, raw, index, "sending wallet", "sent amount")
-        _count_wallet(pack.wallets, raw, index, "from wallet (read-only)", "from amount")
-        _count_wallet(pack.wallets, raw, index, "receiving wallet", "received amount")
-        _count_wallet(pack.wallets, raw, index, "to wallet (read-only)", "to amount")
-        if (
-            "wallet" in index
-            and "sending wallet" not in index
-            and "from wallet (read-only)" not in index
-        ):
-            wallet = _cell(raw, index, "wallet")
-            if wallet:
-                pack.wallets[wallet] = pack.wallets.get(wallet, 0) + 1
-        tag = _cell(raw, index, "tag") or _cell(raw, index, "label")
-        for bucket in _koinly_buckets(_cell(raw, index, "type"), tag):
-            pack.types[bucket] = pack.types.get(bucket, 0) + 1
+        _count_history_row(pack, raw, index, bulk)
 
 
-def _consume_holdings(rows: Sequence[Sequence[str]]) -> HoldingSet:
+def _consume_holdings(rows: Sequence[Sequence[str]], desk: Desk) -> HoldingSet:
     as_of = ""
     for raw in rows:
         joined = " ".join(raw)
@@ -471,16 +561,22 @@ def _consume_holdings(rows: Sequence[Sequence[str]]) -> HoldingSet:
     for raw in rows[header_at + 1 :]:
         if asset_at is None or amount_at is None or asset_at >= len(raw):
             continue
-        asset = raw[asset_at].strip()
+        asset = _canonical_asset(raw[asset_at].strip(), _active_names(desk))
         if not asset or asset.casefold().startswith("balance"):
             continue
-        amounts[asset] = _decimal(raw[amount_at] if amount_at < len(raw) else "")
+        quantity = _decimal(raw[amount_at] if amount_at < len(raw) else "")
+        amounts[asset] = amounts.get(asset, Decimal(0)) + quantity
         if cost_at is not None and cost_at < len(raw) and raw[cost_at].strip():
-            costs[asset] = _decimal(raw[cost_at])
+            costs[asset] = costs.get(asset, Decimal(0)) + _decimal(raw[cost_at])
     tax_year = ""
+    label = ""
     if as_of:
-        tax_year = str(tax_year_of(datetime.fromisoformat(as_of).date()))
-    return HoldingSet(as_of=as_of, tax_year=tax_year, amounts=amounts, costs=costs)
+        year = tax_year_of(datetime.fromisoformat(as_of).date())
+        tax_year = str(year)
+        label = tax_year_label(year)
+    return HoldingSet(
+        as_of=as_of, tax_year=tax_year, tax_year_label=label, amounts=amounts, costs=costs
+    )
 
 
 def _sum_by_year(rows: Sequence[Sequence[str]], prefer: Sequence[str]) -> Dict[str, Decimal]:
@@ -502,23 +598,16 @@ def _sum_by_year(rows: Sequence[Sequence[str]], prefer: Sequence[str]) -> Dict[s
 
 
 def _sum_missing(rows: Sequence[Sequence[str]]) -> Dict[str, Decimal]:
+    """Missing cost from a numeric column, an indicator, or a zero cost on a disposal."""
     header_at = _header_index(rows)
     totals: Dict[str, Decimal] = {}
     if header_at is None:
         return totals
     header = [cell.strip() for cell in rows[header_at]]
-    missing_at = _find_col(header, ("missing cost", "shortfall"))
-    if missing_at is None:
-        return totals
-    date_at = _find_col(header, ("date",))
-    for raw in rows[header_at + 1 :]:
-        if missing_at >= len(raw) or not raw[missing_at].strip():
-            continue
-        if date_at is None or date_at >= len(raw) or not raw[date_at].strip():
-            continue
-        year = str(tax_year_of(_parse_date(raw[date_at])))
-        totals[year] = totals.get(year, Decimal(0)) + _decimal(raw[missing_at])
-    return totals
+    numeric_at = _numeric_missing_col(header, rows, header_at)
+    if numeric_at is not None:
+        return _sum_marked_column(rows, header, header_at, numeric_at, totals)
+    return _sum_missing_lots(rows, header, header_at, totals)
 
 
 def _read_queue(path: str) -> List[QueueItem]:
@@ -539,31 +628,112 @@ def _read_queue(path: str) -> List[QueueItem]:
     return items
 
 
-def _koinly_buckets(type_name: str, tag: str) -> List[str]:
-    folded = type_name.strip().casefold()
-    tag_folded = tag.strip().casefold().replace("_", " ")
-    table = {
-        "transfer": ["withdrawal", "deposit"],
-        "buy": ["trade"],
-        "sell": ["trade"],
-        "exchange": ["trade"],
-        "trade": ["trade"],
-        "crypto_deposit": ["deposit"],
-        "deposit": ["deposit"],
-        "crypto_withdrawal": ["withdrawal"],
-        "withdrawal": ["withdrawal"],
-        "fiat_deposit": ["fiat"],
-        "fiat_withdrawal": ["fiat"],
-    }
-    if folded in table:
-        return table[folded]
-    if any(word in tag_folded for word in ("realized", "margin", "future")):
-        return ["margin"]
-    if tag_folded in ("income", "reward", "interest", "airdrop", "mining", "salary"):
-        return ["income"]
-    if folded:
-        return ["other"]
-    return []
+def _count_history_row(
+    pack: KoinlyPack, raw: Sequence[str], index: Mapping[str, int], bulk: bool
+) -> None:
+    kind = _cell(raw, index, "type").strip().casefold()
+    tag = _cell(raw, index, "tag") or _cell(raw, index, "label")
+    if bulk:
+        sending = _side_wallet(raw, index, "from wallet (read-only)", "from amount")
+        receiving = _side_wallet(raw, index, "to wallet (read-only)", "to amount")
+    else:
+        sending = _side_wallet(raw, index, "sending wallet", "sent amount")
+        receiving = _side_wallet(raw, index, "receiving wallet", "received amount")
+    if (
+        not sending
+        and not receiving
+        and "wallet" in index
+        and "sending wallet" not in index
+        and "from wallet (read-only)" not in index
+    ):
+        sending = _wallet_name(_cell(raw, index, "wallet"))
+    for wallet in _wallets_for(kind, sending, receiving, bulk):
+        pack.wallets[wallet] = pack.wallets.get(wallet, 0) + 1
+    for bucket in _buckets_for(kind, tag, bool(sending), bool(receiving), bulk):
+        pack.types[bucket] = pack.types.get(bucket, 0) + 1
+
+
+def _wallets_for(kind: str, sending: str, receiving: str, bulk: bool) -> List[str]:
+    folded = " ".join(kind.replace("_", " ").split())
+    if bulk and sending and receiving:
+        return [receiving]
+    if not bulk and folded == "transfer":
+        hits = []
+        if sending:
+            hits.append(sending)
+        if receiving:
+            hits.append(receiving)
+        return hits
+    if folded in ("buy", "sell", "exchange", "trade"):
+        chosen = sending or receiving
+        return [chosen] if chosen else []
+    if folded in ("crypto withdrawal", "withdrawal", "fiat withdrawal"):
+        return [sending] if sending else []
+    chosen = receiving or sending
+    return [chosen] if chosen else []
+
+
+def _buckets_for(kind: str, tag: str, has_send: bool, has_receive: bool, bulk: bool) -> List[str]:
+    folded = " ".join(kind.replace("_", " ").split())
+    names: List[str] = []
+    if bulk and has_send and has_receive:
+        names = ["trade"]
+    elif not bulk and folded == "transfer":
+        if has_send:
+            names.append("withdrawal")
+        if has_receive:
+            names.append("deposit")
+        if not names:
+            names = ["withdrawal", "deposit"]
+    elif folded in ("buy", "sell", "exchange", "trade"):
+        names = ["trade"]
+    else:
+        tagged = _tag_bucket(tag)
+        if tagged:
+            names = [tagged]
+        elif folded in ("crypto deposit", "deposit"):
+            names = ["deposit"]
+        elif folded in ("crypto withdrawal", "withdrawal"):
+            names = ["withdrawal"]
+        elif folded in ("fiat deposit", "fiat withdrawal"):
+            names = ["fiat"]
+        elif folded in ("reward", "staking", "airdrop", "mining", "interest", "income"):
+            names = ["income"]
+        elif folded:
+            names = ["other"]
+    return names
+
+
+def _tag_bucket(tag: str) -> str:
+    folded = " ".join(tag.replace("_", " ").split()).casefold()
+    if not folded:
+        return ""
+    if "realized" in folded or folded in _MARGIN_TAGS:
+        return "margin"
+    if folded in _INCOME_TAGS:
+        return "income"
+    return ""
+
+
+def _side_wallet(
+    raw: Sequence[str], index: Mapping[str, int], wallet_key: str, amount_key: str
+) -> str:
+    if wallet_key not in index:
+        return ""
+    wallet = _wallet_name(_cell(raw, index, wallet_key))
+    if not wallet:
+        return ""
+    if amount_key not in index:
+        return wallet
+    amount = _cell(raw, index, amount_key)
+    if amount.strip() in ("", "0", "0.0") or _decimal(amount) == 0:
+        return ""
+    return wallet
+
+
+def _wallet_name(value: str) -> str:
+    """Drop the ;id suffix Koinly adds to a wallet or currency cell."""
+    return value.split(";", 1)[0].strip()
 
 
 def _skipped_wallet(raw: Sequence[str], index: Mapping[str, int], skip_wallets: Set[str]) -> bool:
@@ -578,23 +748,8 @@ def _skipped_wallet(raw: Sequence[str], index: Mapping[str, int], skip_wallets: 
         )
         if key in index
     ]
-    present = [name for name in names if name]
+    present = [_wallet_name(name) for name in names if name]
     return bool(present) and all(name in skip_wallets for name in present)
-
-
-def _count_wallet(
-    wallets: Dict[str, int],
-    raw: Sequence[str],
-    index: Mapping[str, int],
-    wallet_key: str,
-    amount_key: str,
-) -> None:
-    if wallet_key not in index:
-        return
-    wallet = _cell(raw, index, wallet_key)
-    amount = _cell(raw, index, amount_key) if amount_key in index else "1"
-    if wallet and amount.strip() not in ("", "0", "0.0"):
-        wallets[wallet] = wallets.get(wallet, 0) + 1
 
 
 def _pools_for(snapshot: Mapping[str, Any], year: str) -> Dict[str, Decimal]:
@@ -644,10 +799,11 @@ def _header_index(rows: Sequence[Sequence[str]]) -> Optional[int]:
 
 
 def _find_col(header: Sequence[str], needles: Sequence[str]) -> Optional[int]:
-    for index, cell in enumerate(header):
-        folded = cell.strip().casefold()
-        if any(needle in folded for needle in needles):
-            if "fee" in folded and "gain" in needles:
+    """Prefer needles in the order given, so value is chosen before amount."""
+    for needle in needles:
+        for index, cell in enumerate(header):
+            folded = cell.strip().casefold()
+            if needle not in folded or "fee" in folded:
                 continue
             return index
     return None
@@ -676,9 +832,12 @@ def _parse_as_of(text: str) -> str:
     marker = text.casefold().find("balances as at")
     tail = text[marker + len("balances as at") :]
     tail = tail.replace("23:59", " ").replace(",", " ")
+    iso = re.search(r"\d{4}-\d{2}-\d{2}", tail)
     try:
-        return dateutil.parser.parse(tail, dayfirst=True, fuzzy=True).date().isoformat()
-    except (ValueError, OverflowError):
+        if iso:
+            return _parse_date(iso.group(0)).isoformat()
+        return _parse_date(tail).isoformat()
+    except (ValueError, OverflowError, TypeError):
         return ""
 
 
@@ -717,6 +876,163 @@ def _decimal(value: object) -> Decimal:
     if negative:
         return -number
     return number
+
+
+def _active_names(desk: Desk) -> Mapping[str, Sequence[str]]:
+    if desk.asset_names is None:
+        return _DEFAULT_ASSET_NAMES
+    return desk.asset_names
+
+
+def _canonical_asset(label: str, names: Mapping[str, Sequence[str]]) -> str:
+    """Map an official Koinly label onto its symbol. A lookalike name stays as written."""
+    text = label.strip()
+    if not text:
+        return text
+    folded = text.casefold()
+    for symbol, aliases in names.items():
+        allowed = {symbol.casefold()}
+        allowed.update(alias.casefold() for alias in aliases)
+        if folded in allowed:
+            return symbol.upper()
+    match = re.fullmatch(r"([A-Za-z0-9]+)\s*\((.+)\)", text)
+    if match is None:
+        return text
+    symbol = match.group(1).upper()
+    inside = match.group(2).strip().casefold()
+    allowed_inside = {alias.casefold() for alias in names.get(symbol, ())}
+    if inside in allowed_inside:
+        return symbol
+    return text
+
+
+def _numeric_missing_col(
+    header: Sequence[str], rows: Sequence[Sequence[str]], header_at: int
+) -> Optional[int]:
+    for index, cell in enumerate(header):
+        folded = cell.strip().casefold()
+        if "missing cost" not in folded and "shortfall" not in folded:
+            continue
+        if _column_is_numeric(rows, header_at, index):
+            return index
+    return None
+
+
+def _column_is_numeric(rows: Sequence[Sequence[str]], header_at: int, index: int) -> bool:
+    saw = False
+    for raw in rows[header_at + 1 :]:
+        if index >= len(raw) or not raw[index].strip():
+            continue
+        saw = True
+        if not _is_plain_number(raw[index]):
+            return False
+    return saw
+
+
+def _is_plain_number(value: str) -> bool:
+    text = value.strip().replace(",", "").replace(" ", "").replace("£", "").replace("$", "")
+    if text.startswith("(") and text.endswith(")"):
+        text = text[1:-1]
+    if not text:
+        return False
+    try:
+        Decimal(text)
+    except (ArithmeticError, ValueError):
+        return False
+    return True
+
+
+def _sum_marked_column(
+    rows: Sequence[Sequence[str]],
+    header: Sequence[str],
+    header_at: int,
+    column: int,
+    totals: Dict[str, Decimal],
+) -> Dict[str, Decimal]:
+    date_at = _find_col(header, ("date",))
+    for raw in rows[header_at + 1 :]:
+        if column >= len(raw) or not raw[column].strip():
+            continue
+        if date_at is None or date_at >= len(raw) or not raw[date_at].strip():
+            continue
+        year = str(tax_year_of(_parse_date(raw[date_at])))
+        totals[year] = totals.get(year, Decimal(0)) + _decimal(raw[column])
+    return totals
+
+
+def _sum_missing_lots(
+    rows: Sequence[Sequence[str]],
+    header: Sequence[str],
+    header_at: int,
+    totals: Dict[str, Decimal],
+) -> Dict[str, Decimal]:
+    date_at = _find_col(header, ("date",))
+    cost_at = _find_disposal_cost(header)
+    proceeds_at = _find_col(header, ("proceeds",))
+    gain_at = _find_col(header, ("gain",))
+    indicator_at = _indicator_col(header, rows, header_at)
+    if date_at is None:
+        return totals
+    for raw in rows[header_at + 1 :]:
+        if date_at >= len(raw) or not raw[date_at].strip():
+            continue
+        amount = _lot_missing_amount(raw, cost_at, proceeds_at, gain_at, indicator_at)
+        if amount == 0:
+            continue
+        year = str(tax_year_of(_parse_date(raw[date_at])))
+        totals[year] = totals.get(year, Decimal(0)) + amount
+    return totals
+
+
+def _find_disposal_cost(header: Sequence[str]) -> Optional[int]:
+    for index, cell in enumerate(header):
+        folded = cell.strip().casefold()
+        if "cost" in folded and "missing" not in folded and "fee" not in folded:
+            return index
+    return None
+
+
+def _indicator_col(
+    header: Sequence[str], rows: Sequence[Sequence[str]], header_at: int
+) -> Optional[int]:
+    for index, cell in enumerate(header):
+        folded = cell.strip().casefold()
+        if "missing cost" not in folded and "shortfall" not in folded:
+            continue
+        if not _column_is_numeric(rows, header_at, index):
+            return index
+    return None
+
+
+def _lot_missing_amount(
+    raw: Sequence[str],
+    cost_at: Optional[int],
+    proceeds_at: Optional[int],
+    gain_at: Optional[int],
+    indicator_at: Optional[int],
+) -> Decimal:
+    proceeds = (
+        _decimal(raw[proceeds_at])
+        if proceeds_at is not None and proceeds_at < len(raw)
+        else Decimal(0)
+    )
+    gain = _decimal(raw[gain_at]) if gain_at is not None and gain_at < len(raw) else Decimal(0)
+    amount = proceeds if proceeds != 0 else gain
+    if indicator_at is not None:
+        flag = raw[indicator_at].strip().casefold() if indicator_at < len(raw) else ""
+        if flag not in ("yes", "true", "1", "y", "missing"):
+            return Decimal(0)
+        return amount
+    if cost_at is None or cost_at >= len(raw):
+        return Decimal(0)
+    cost_text = raw[cost_at].strip()
+    if cost_text and _decimal(cost_text) != 0:
+        return Decimal(0)
+    if proceeds > 0:
+        return proceeds
+    if gain > 0:
+        return gain
+    return Decimal(0)
 
 
 def _add_totals(target: Dict[str, Decimal], extra: Mapping[str, Decimal]) -> None:

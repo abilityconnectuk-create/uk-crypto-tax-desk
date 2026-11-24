@@ -231,16 +231,27 @@ def _pair(legs: Sequence[TransferLeg], settings: MatchSettings, result: Reconcil
     ins = [leg for leg in legs if leg.direction == "in" and leg.eligible and not leg.consumed]
     outs.sort(key=_sort_key)
     ins.sort(key=_sort_key)
-    applied: List[Tuple[TransferLeg, TransferLeg]] = []
+    # Imported here: pairing already imports this module while it is loading.
+    from .pairing import LegIndex  # pylint: disable=import-outside-toplevel,cyclic-import
+
+    index = LegIndex(ins, settings)
+    # A mirror is the same timestamp recorded in reverse, so only that instant is checked.
+    applied_at: Dict[datetime, List[Tuple[TransferLeg, TransferLeg]]] = {}
     for out in outs:
         if out.consumed:
             continue
-        chosen = _best_deposit(out, ins, settings, applied)
+        stamp = _as_utc(_record(out.row).timestamp)
+        chosen = _best_deposit(
+            out,
+            index.asset_window(out, settings.window),
+            settings,
+            applied_at.get(stamp, ()),
+        )
         if chosen is None:
             continue
         result.match_seq += 1
         _apply_match(out, chosen, result.match_seq, settings, result)
-        applied.append((out, chosen))
+        applied_at.setdefault(stamp, []).append((out, chosen))
 
 
 def _best_deposit(
