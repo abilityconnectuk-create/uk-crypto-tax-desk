@@ -640,6 +640,12 @@ def test_example_registry_loads() -> None:
     assert registry.receipt_tokens[0].venue.endswith("0e01")
     assert registry.receipt_tokens[0].deposit == "USDC"
     assert registry.receipt_tokens[0].receipt == "Z0USDC"
+    assert registry.bridges.routes[0].name == "mayan"
+    assert registry.bridges.routes[0].same_asset_only is True
+    assert registry.bridges.routes[0].patterns == ("mayan",)
+    assert registry.match_overrides.leave_unmatched[0].tx_hash.endswith("1111")
+    assert registry.match_overrides.leave_unmatched[1].asset == "USDT"
+    assert registry.match_overrides.force_pair[0].kind == "transfer"
     assert registry.official_contracts[0].asset == "USDT"
     assert registry.official_contracts[0].names == ("Tether USD",)
     assert registry.poison_addresses[0].address.endswith("0b0b")
@@ -651,6 +657,16 @@ def test_example_registry_loads() -> None:
 def test_registry_rejects_unknown_keys(tmp_path: Path) -> None:
     path = tmp_path / "wallets.yaml"
     path.write_text("own:\n  - label: X\n    addr: '0x1'\n", encoding="utf-8")
+    with pytest.raises(WalletRegistryError):
+        load_wallet_registry(str(path))
+
+
+def test_match_overrides_reject_an_unknown_pair_type(tmp_path: Path) -> None:
+    path = tmp_path / "wallets.yaml"
+    path.write_text(
+        "match_overrides:\n  force_pair:\n    - {out: a, in: b, type: swap}\n",
+        encoding="utf-8",
+    )
     with pytest.raises(WalletRegistryError):
         load_wallet_registry(str(path))
 

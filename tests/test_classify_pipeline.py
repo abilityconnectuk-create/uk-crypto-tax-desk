@@ -6,7 +6,7 @@ from test_transfer_match import BASE, LEDGER, OTHER, PAYEE, _actions, _make, _pa
 from bittytax.bt_types import TrType
 from bittytax.conv.transfer_match import NEEDS_REVIEW_TYPE
 from bittytax.conv.txref import hashes_equal
-from bittytax.conv.wallets import AddressRule, RegistryEntry
+from bittytax.conv.wallets import AddressRule, BridgeRoute, ForcePair, LeaveUnmatched, RegistryEntry
 
 CHAIN = "0x" + "ab" * 32
 LOOKALIKE = "USD\u0422"
@@ -580,3 +580,171 @@ def test_transfer_to_a_configured_venue() -> None:
     result = _run(sent, registry=registry)
     assert sent.t_record is not None and sent.t_record.t_type is TrType.WITHDRAWAL
     assert "transfer-to-venue" in _actions(result)
+
+
+def test_leave_unmatched_blocks_swap_bridge_and_fuzzy() -> None:
+    swap_hash = "0x" + "51" * 32
+    fuzzy_hash = "0x" + "52" * 32
+    usdt_hash = "0x" + "53" * 32
+    eth_hash = "0x" + "54" * 32
+    registry = _registry(
+        own=[
+            RegistryEntry(label="Ledger ETH", address=LEDGER, chain="ethereum"),
+            RegistryEntry(label="Cold store", address=OTHER, chain="ethereum"),
+        ]
+    )
+    registry.match.same_wallet_swaps = True
+    registry.match_overrides.leave_unmatched = [
+        LeaveUnmatched(swap_hash),
+        LeaveUnmatched(fuzzy_hash),
+        LeaveUnmatched(usdt_hash, "USDT"),
+    ]
+
+    sold = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Ledger", tx_hash=swap_hash, value="100")
+    bought = _make(
+        TrType.GIFT_RECEIVED, BASE, "USDC", "100", "Ledger", tx_hash=swap_hash, value="100"
+    )
+    swapped = _run(sold, bought, registry=registry)
+    assert sold.t_record is not None and sold.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert sold.t_record.t_type is not TrType.TRADE
+    assert "leave-unmatched" in _actions(swapped)
+    assert "same-wallet-swap" not in _actions(swapped)
+
+    sent = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Ledger ETH", tx_hash=fuzzy_hash)
+    received = _make(
+        TrType.GIFT_RECEIVED, BASE + timedelta(hours=1), "ETH", "1", "Cold store", tx_hash="0xfuzz"
+    )
+    fuzzy = _run(sent, received, registry=registry)
+    assert sent.t_record is not None and sent.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert sent.t_record.t_type is not TrType.WITHDRAWAL
+    assert "leave-unmatched" in _actions(fuzzy)
+    assert "matched-fuzzy" not in _actions(fuzzy)
+    assert "matched" not in _actions(fuzzy)
+
+    held = _make(
+        TrType.GIFT_SENT, BASE, "USDT", "1000", "Exchange", chain="ethereum", tx_hash=usdt_hash
+    )
+    held_in = _make(
+        TrType.GIFT_RECEIVED, BASE, "USDT", "1000", "Ledger", chain="arbitrum", tx_hash="0xusdtin"
+    )
+    free = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Exchange", chain="ethereum", tx_hash=eth_hash)
+    free_in = _make(
+        TrType.GIFT_RECEIVED, BASE, "ETH", "1", "Ledger", chain="arbitrum", tx_hash="0xethin"
+    )
+    for row in (held, held_in, free, free_in):
+        row.row_dict["Description"] = "bridge"
+    bridged = _run(held, held_in, free, free_in, registry=registry)
+    assert held.t_record is not None and held.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert "missing destination-chain deposit" in held.t_record.note
+    assert free.t_record is not None and free.t_record.t_type is TrType.WITHDRAWAL
+    assert free_in.t_record is not None and free_in.t_record.t_type is TrType.DEPOSIT
+    assert "leave-unmatched" in _actions(bridged)
+    assert _actions(bridged).count("bridge-transfer") == 1
+
+
+def test_force_pair_writes_a_transfer_or_an_exchange() -> None:
+    out_hash = "0x" + "61" * 32
+    in_hash = "0x" + "62" * 32
+    trade_out = "0x" + "63" * 32
+    trade_in = "0x" + "64" * 32
+    blocked_out = "0x" + "71" * 32
+    blocked_in = "0x" + "72" * 32
+    registry = _registry(
+        own=[
+            RegistryEntry(label="Ledger ETH", address=LEDGER, chain="ethereum"),
+            RegistryEntry(label="Cold store", address=OTHER, chain="ethereum"),
+        ]
+    )
+    registry.match_overrides.force_pair = [
+        ForcePair(out_hash, in_hash, "transfer"),
+        ForcePair(trade_out, trade_in, "exchange"),
+    ]
+    sent = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Exchange", tx_hash=out_hash)
+    received = _make(
+        TrType.GIFT_RECEIVED,
+        BASE + timedelta(days=10),
+        "ETH",
+        "9",
+        "Ledger",
+        tx_hash=in_hash,
+    )
+    moved = _run(sent, received, registry=registry)
+    assert sent.t_record is not None and sent.t_record.t_type is TrType.WITHDRAWAL
+    assert received.t_record is not None and received.t_record.t_type is TrType.DEPOSIT
+    assert "override-transfer" in _actions(moved)
+    assert "match override" in moved.summary[0].detail
+
+    sold = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Ledger ETH", tx_hash=trade_out)
+    bought = _make(TrType.GIFT_RECEIVED, BASE, "ETH", "1", "Cold store", tx_hash=trade_in)
+    traded = _run(sold, bought, registry=registry)
+    assert sold.t_record is not None and sold.t_record.t_type is TrType.TRADE
+    assert sold.t_record.buy_asset == "ETH"
+    assert bought.t_record is None
+    assert "override-exchange" in _actions(traded)
+    assert "matched" not in _actions(traded)
+    assert "matched-fuzzy" not in _actions(traded)
+
+    registry.match_overrides.leave_unmatched = [LeaveUnmatched(blocked_out)]
+    registry.match_overrides.force_pair.append(ForcePair(blocked_out, blocked_in, "transfer"))
+    blocked = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Ledger ETH", tx_hash=blocked_out)
+    other = _make(TrType.GIFT_RECEIVED, BASE, "ETH", "1", "Cold store", tx_hash=blocked_in)
+    refused = _run(blocked, other, registry=registry)
+    assert blocked.t_record is not None and blocked.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert "leave-unmatched" in _actions(refused)
+    assert "override-transfer" not in _actions(refused)
+
+
+def test_same_asset_only_route_leaves_a_missing_receive() -> None:
+    registry = _registry()
+    registry.bridges.routes.append(BridgeRoute("mayan", True, ("mayan",)))
+    sent = _make(TrType.GIFT_SENT, BASE, "USDT", "1500", "Exchange", chain="ethereum", value="1500")
+    received = _make(
+        TrType.GIFT_RECEIVED,
+        BASE + timedelta(hours=2),
+        "USDC",
+        "1490",
+        "Ledger",
+        chain="arbitrum",
+        value="1490",
+    )
+    sent.row_dict["Description"] = "Mayan USDT"
+    missed = _run(sent, received, registry=registry)
+    assert sent.t_record is not None and sent.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert sent.t_record.t_type is not TrType.TRADE
+    assert "missing destination-chain deposit" in sent.t_record.note
+    assert missed.queue[0].disposition == "missing-destination"
+    assert "bridge-exchange" not in _actions(missed)
+
+    same = _make(TrType.GIFT_SENT, BASE, "USDT", "1500", "Exchange", chain="ethereum", value="1500")
+    same_in = _make(
+        TrType.GIFT_RECEIVED,
+        BASE + timedelta(hours=1),
+        "USDT",
+        "1490",
+        "Ledger",
+        chain="arbitrum",
+        value="1490",
+    )
+    same.row_dict["Description"] = "Mayan USDT"
+    kept = _run(same, same_in, registry=registry)
+    assert same.t_record is not None and same.t_record.t_type is TrType.WITHDRAWAL
+    assert same_in.t_record is not None and same_in.t_record.t_type is TrType.DEPOSIT
+    assert "bridge-transfer" in _actions(kept)
+
+    plain = _make(
+        TrType.GIFT_SENT, BASE, "USDT", "1500", "Exchange", chain="ethereum", value="1500"
+    )
+    changed = _make(
+        TrType.GIFT_RECEIVED,
+        BASE + timedelta(hours=2),
+        "USDC",
+        "1490",
+        "Ledger",
+        chain="arbitrum",
+        value="1490",
+    )
+    plain.row_dict["Description"] = "bridge out"
+    swapped = _run(plain, changed, registry=registry)
+    assert plain.t_record is not None and plain.t_record.t_type is TrType.TRADE
+    assert plain.t_record.buy_asset == "USDC"
+    assert "bridge-exchange" in _actions(swapped)

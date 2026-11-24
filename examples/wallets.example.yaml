@@ -125,6 +125,21 @@ bridges:
       chain: ethereum
       category: bridge
       address: "0x00000000000000000000000000000000000000b1"
+  # A named route. The name is the text pattern when patterns is omitted.
+  # same_asset_only refuses a token change, so a missing receive stays unmatched.
+  mayan:
+    same_asset_only: true
+
+# Applied before the other matchers. Hashes below are fake.
+match_overrides:
+  leave_unmatched:
+    - "0x1111111111111111111111111111111111111111"
+    - tx_hash: "0x2222222222222222222222222222222222222222"
+      asset: USDT
+  force_pair:
+    - out: "0x3333333333333333333333333333333333333333"
+      in: "0x4444444444444444444444444444444444444444"
+      type: transfer
 
 # Longer patterns win. income, dust and ignore are the only treatments.
 utilities:

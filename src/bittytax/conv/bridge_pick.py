@@ -17,6 +17,8 @@ from .pairing import (  # pylint: disable=cyclic-import
     _leg_value,
     _merge_exchange,
     _record,
+    _selectable,
+    _text,
     _tx_hash,
     _wallets_differ,
     amounts_match,
@@ -31,10 +33,10 @@ def pair_bridges(
     legs: Sequence[TransferLeg], registry: WalletRegistry, result: ReconcileResult
 ) -> None:
     """Closest unused in-leg. A missing chain column uses the wallet entry."""
-    incoming = [leg for leg in legs if leg.direction == "in" and leg.eligible and not leg.consumed]
+    incoming = [leg for leg in legs if _selectable(leg, "in")]
     index = LegIndex(incoming, registry.match)
     for out in legs:
-        if out.direction != "out" or not out.eligible or out.consumed:
+        if not _selectable(out, "out"):
             continue
         if not _bridge_evidence(out.row, registry):
             continue
@@ -69,7 +71,12 @@ def _closest_bridge_in(
     same: List[TransferLeg] = []
     changed: List[TransferLeg] = []
     for leg in incoming:
-        if leg.consumed or leg.row is out.row or not _bridge_candidate(out, leg, registry):
+        if (
+            leg.consumed
+            or leg.held
+            or leg.row is out.row
+            or not _bridge_candidate(out, leg, registry)
+        ):
             continue
         if assets_compatible(_asset(out.row, "out"), _asset(leg.row, "in"), registry.match):
             same.append(leg)
@@ -109,6 +116,8 @@ def _token_change(out: TransferLeg, incoming: TransferLeg, registry: WalletRegis
     A similar quantity does not qualify, and a marked token name is not a fungible in-leg.
     """
     if _collectible_leg(incoming):
+        return False
+    if registry.bridges.blocks_token_change(_text(out.row)):
         return False
     return _values_close(out, incoming, registry)
 

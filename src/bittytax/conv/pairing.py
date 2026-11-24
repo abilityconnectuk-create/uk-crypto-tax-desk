@@ -74,7 +74,7 @@ def classify_before_pair(
 ) -> None:
     """Apply typed rules that must win before a withdrawal is paired as a transfer."""
     for row in rows:
-        if row.t_record is None or row.failure is not None:
+        if row.t_record is None or row.failure is not None or id(row) in result.pinned:
             continue
         if _classify_margin(row, registry, result):
             continue
@@ -200,14 +200,18 @@ def _union_legs(*groups: Sequence[TransferLeg]) -> List[TransferLeg]:
     return found
 
 
+def _selectable(leg: TransferLeg, direction: str) -> bool:
+    return leg.direction == direction and leg.eligible and not leg.consumed and not leg.held
+
+
 def pair_by_hash(
     legs: Sequence[TransferLeg], registry: WalletRegistry, result: ReconcileResult
 ) -> None:
     """Pair legs that share a transaction hash after 0x and case normalisation."""
-    incoming = [leg for leg in legs if leg.direction == "in" and leg.eligible and not leg.consumed]
+    incoming = [leg for leg in legs if _selectable(leg, "in")]
     index = LegIndex(incoming, registry.match)
     for out in legs:
-        if out.direction != "out" or not out.eligible or out.consumed:
+        if not _selectable(out, "out"):
             continue
         raw = _tx_hash(out.row)
         if not raw:
@@ -227,10 +231,10 @@ def pair_cex_chain(
     legs: Sequence[TransferLeg], registry: WalletRegistry, result: ReconcileResult
 ) -> None:
     """Pair an exchange id with a chain hash when destination, amount and time agree."""
-    incoming = [leg for leg in legs if leg.direction == "in" and leg.eligible and not leg.consumed]
+    incoming = [leg for leg in legs if _selectable(leg, "in")]
     index = LegIndex(incoming, registry.match)
     for out in legs:
-        if out.direction != "out" or not out.eligible or out.consumed:
+        if not _selectable(out, "out"):
             continue
         chosen = _closest(
             out, index.asset_window(out, registry.match.cex_window), registry, _cex_candidate
@@ -255,7 +259,7 @@ def pair_same_wallet_swaps(
         return
     grouped: Dict[str, List[TransferLeg]] = {}
     for leg in legs:
-        if not leg.eligible or not _leg_readable(leg):
+        if not leg.eligible or not _leg_readable(leg) or leg.held:
             continue
         digest = normalise_tx_hash(_tx_hash(leg.row))
         if not digest:
@@ -282,7 +286,7 @@ def pair_receipt_tokens(
         return
     grouped: Dict[str, List[TransferLeg]] = {}
     for leg in legs:
-        if not leg.eligible or not _leg_readable(leg):
+        if not leg.eligible or not _leg_readable(leg) or leg.held:
             continue
         digest = normalise_tx_hash(_tx_hash(leg.row))
         if digest:
@@ -294,10 +298,10 @@ def pair_receipt_tokens(
 def pair_swaps(
     legs: Sequence[TransferLeg], registry: WalletRegistry, result: ReconcileResult
 ) -> None:
-    incoming = [leg for leg in legs if leg.direction == "in" and leg.eligible and not leg.consumed]
+    incoming = [leg for leg in legs if _selectable(leg, "in")]
     index = LegIndex(incoming, registry.match)
     for out in legs:
-        if out.direction != "out" or not out.eligible or out.consumed:
+        if not _selectable(out, "out"):
             continue
         rule = _rule_on(out.row, registry, "swap", "out")
         if rule is None:
@@ -313,10 +317,10 @@ def pair_fuzzy(
     legs: Sequence[TransferLeg], registry: WalletRegistry, result: ReconcileResult
 ) -> None:
     """Own-wallet match. At least two of hash, address, and amount-plus-time."""
-    incoming = [leg for leg in legs if leg.direction == "in" and leg.eligible and not leg.consumed]
+    incoming = [leg for leg in legs if _selectable(leg, "in")]
     index = LegIndex(incoming, registry.match)
     for out in legs:
-        if out.direction != "out" or not out.eligible or out.consumed:
+        if not _selectable(out, "out"):
             continue
         # The window depends on the incoming leg, so this uses the widest window.
         chosen = _closest(
@@ -587,6 +591,8 @@ def _pair_one_wallet(
     if len(outs) != 1 or len(incoming) != 1:
         return
     out, received = outs[0], incoming[0]
+    if out.held or received.held:
+        return
     if assets_compatible(_asset(out.row, "out"), _asset(received.row, "in"), registry.match):
         return
     if _collectible_leg(out) or _collectible_leg(received):
@@ -801,7 +807,7 @@ def _receipt_in(
     wanted = rule.receipt.strip().casefold()
     digest = normalise_tx_hash(_tx_hash(out.row))
     for leg in group:
-        if leg.direction != "in" or not _leg_readable(leg) or leg.row is out.row:
+        if leg.direction != "in" or leg.held or not _leg_readable(leg) or leg.row is out.row:
             continue
         if normalise_tx_hash(_tx_hash(leg.row)) != digest:
             continue
@@ -867,7 +873,7 @@ def _closest(
     chosen: Optional[TransferLeg] = None
     chosen_key: Optional[Tuple[Decimal, timedelta]] = None
     for leg in incoming:
-        if leg.consumed or leg.row is out.row or not allowed(out, leg, registry):
+        if leg.consumed or leg.held or leg.row is out.row or not allowed(out, leg, registry):
             continue
         key = (amount_gap_of(out.row, leg.row, registry.match), _gap(out, leg))
         if chosen_key is None or key < chosen_key:
@@ -920,6 +926,8 @@ def _flag(leg: TransferLeg, result: ReconcileResult, action: str, detail: str) -
 def _bridge_evidence(row: DataRow, registry: WalletRegistry) -> bool:
     text = _text(row)
     if any(pattern and pattern in text for pattern in registry.bridges.patterns):
+        return True
+    if registry.bridges.matches_route(text):
         return True
     return (
         _rule_on(row, registry, "bridge", "out") is not None

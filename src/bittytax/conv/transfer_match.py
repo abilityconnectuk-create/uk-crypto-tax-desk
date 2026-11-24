@@ -63,6 +63,7 @@ class TransferLeg:
     ambiguous: bool
     eligible: bool
     consumed: bool = False
+    held: bool = False
     own_entry: Optional[RegistryEntry] = None
     payee_entry: Optional[RegistryEntry] = None
     cex: bool = False
@@ -90,14 +91,12 @@ def reconcile_transfers(
     Runs on already-parsed rows, across every file in the conversion. Parsers are
     left unchanged, so nothing happens unless the caller invokes it.
     """
-    result = ReconcileResult()
-    # Imported here so this module can finish loading before the pairing rules
-    # import it back.
     from .allocations import (  # pylint: disable=import-outside-toplevel
         apply_allocation_links,
         mark_allocation_payments,
     )
     from .bridge_pick import pair_bridges  # pylint: disable=import-outside-toplevel
+    from .match_overrides import apply_match_overrides  # pylint: disable=import-outside-toplevel
     from .pairing import (  # pylint: disable=import-outside-toplevel,cyclic-import
         classify_before_pair,
         flag_unresolved,
@@ -109,11 +108,17 @@ def reconcile_transfers(
         pair_swaps,
     )
 
+    result = ReconcileResult()
     early = [leg for leg in (_leg_for(row, registry) for row in rows) if leg is not None]
+    apply_match_overrides(early, registry, result)
     pair_receipt_tokens(early, registry, result)
     classify_before_pair(rows, registry, result)
     mark_allocation_payments(rows, registry, result)
     legs = [leg for leg in (_leg_for(row, registry) for row in rows) if leg is not None]
+    for leg in legs:
+        if id(leg.row) in result.pinned:
+            leg.consumed = True
+    apply_match_overrides(legs, registry, result, announce=False)
     pair_by_hash(legs, registry, result)
     pair_cex_chain(legs, registry, result)
     pair_bridges(legs, registry, result)
@@ -206,8 +211,16 @@ def format_reconciliation_message(result: ReconcileResult) -> str:
 
 
 def _pair(legs: Sequence[TransferLeg], settings: MatchSettings, result: ReconcileResult) -> None:
-    outs = [leg for leg in legs if leg.direction == "out" and leg.eligible and not leg.consumed]
-    ins = [leg for leg in legs if leg.direction == "in" and leg.eligible and not leg.consumed]
+    outs = [
+        leg
+        for leg in legs
+        if leg.direction == "out" and leg.eligible and not leg.consumed and not leg.held
+    ]
+    ins = [
+        leg
+        for leg in legs
+        if leg.direction == "in" and leg.eligible and not leg.consumed and not leg.held
+    ]
     outs.sort(key=_sort_key)
     ins.sort(key=_sort_key)
     # Imported here: pairing already imports this module while it is loading.
@@ -242,7 +255,7 @@ def _best_deposit(
     chosen: Optional[TransferLeg] = None
     chosen_score: Optional[Tuple[Decimal, timedelta, int]] = None
     for incoming in ins:
-        if incoming.consumed or not _compatible(out, incoming, settings):
+        if incoming.consumed or incoming.held or not _compatible(out, incoming, settings):
             continue
         if any(
             _is_mirror(prev_out, prev_in, out, incoming, settings) for prev_out, prev_in in applied

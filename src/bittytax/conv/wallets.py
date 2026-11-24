@@ -110,9 +110,31 @@ class OfficialContract:
 
 
 @dataclass
+class BridgeRoute:
+    """One named bridge. same_asset_only rejects a token-change in-leg."""
+
+    name: str
+    same_asset_only: bool = False
+    patterns: Tuple[str, ...] = ()
+
+
+@dataclass
 class BridgeRules:
     patterns: Tuple[str, ...] = ("bridge",)
     contracts: List[AddressRule] = field(default_factory=list)
+    routes: List[BridgeRoute] = field(default_factory=list)
+
+    def matches_route(self, text: str) -> bool:
+        """True when the row text names a configured route."""
+        folded = text.casefold()
+        return any(_pattern_hit(route.patterns, folded) for route in self.routes)
+
+    def blocks_token_change(self, text: str) -> bool:
+        """True when that route accepts only the same asset."""
+        folded = text.casefold()
+        return any(
+            route.same_asset_only and _pattern_hit(route.patterns, folded) for route in self.routes
+        )
 
 
 @dataclass
@@ -159,6 +181,29 @@ class ReceiptTokenRule:
     receipt: str
 
 
+@dataclass
+class LeaveUnmatched:
+    """A listed hash is not paired. An asset limits that to one symbol."""
+
+    tx_hash: str
+    asset: str = ""
+
+
+@dataclass
+class ForcePair:
+    """An explicit pair. kind is transfer or exchange."""
+
+    out_hash: str
+    in_hash: str
+    kind: str
+
+
+@dataclass
+class MatchOverrides:
+    leave_unmatched: List[LeaveUnmatched] = field(default_factory=list)
+    force_pair: List[ForcePair] = field(default_factory=list)
+
+
 def _default_utilities() -> List[UtilityRule]:
     return [
         UtilityRule("launchpool", "income"),
@@ -203,6 +248,7 @@ class WalletRegistry:  # pylint: disable=too-many-instance-attributes
     allocations: List[AllocationRule] = field(default_factory=list)
     allocation_links: List[AllocationLink] = field(default_factory=list)
     receipt_tokens: List[ReceiptTokenRule] = field(default_factory=list)
+    match_overrides: MatchOverrides = field(default_factory=MatchOverrides)
 
 
 _TOP_LEVEL = {
@@ -228,6 +274,7 @@ _TOP_LEVEL = {
     "allocations",
     "allocation_links",
     "receipt_tokens",
+    "match_overrides",
 }
 _ADDRESS_CATEGORIES = {"transfer-to-venue", "swap", "lp", "collateral", "stake", "bridge"}
 _UTILITY_TREATMENTS = {"income", "dust", "ignore"}
@@ -323,6 +370,8 @@ def load_wallet_registry(path: str) -> WalletRegistry:
         registry.allocation_links = _load_allocation_links(loaded.get("allocation_links"))
     if "receipt_tokens" in loaded:
         registry.receipt_tokens = _load_receipt_tokens(loaded.get("receipt_tokens"))
+    if "match_overrides" in loaded:
+        registry.match_overrides = _load_match_overrides(loaded.get("match_overrides"))
     return registry
 
 
@@ -734,19 +783,103 @@ def _load_address_rule(value: object, where: str, default_category: str) -> Addr
     )
 
 
+def _pattern_hit(patterns: Sequence[str], text: str) -> bool:
+    folded = text.casefold()
+    return any(pattern and pattern.casefold() in folded for pattern in patterns)
+
+
 def _load_bridges(value: object) -> BridgeRules:
     item = _require_mapping(value, "bridges")
-    unknown = set(item) - {"patterns", "contracts"}
-    if unknown:
-        names = ", ".join(sorted(str(name) for name in unknown))
-        raise WalletRegistryError(f"bridges has unknown keys: {names}")
+    routes = []
+    for key, raw in item.items():
+        if key in ("patterns", "contracts"):
+            continue
+        routes.append(_load_bridge_route(str(key), raw))
     patterns = tuple(_pattern_list(item.get("patterns"), "bridges.patterns")) or ("bridge",)
     contracts = (
         _load_address_rules(item.get("contracts"), "bridges.contracts", "bridge")
         if "contracts" in item
         else []
     )
-    return BridgeRules(patterns=patterns, contracts=contracts)
+    return BridgeRules(patterns=patterns, contracts=contracts, routes=routes)
+
+
+def _load_bridge_route(name: str, value: object) -> BridgeRoute:
+    where = f"bridges.{name}"
+    item = _require_mapping(value, where)
+    unknown = set(item) - {"same_asset_only", "patterns"}
+    if unknown:
+        names = ", ".join(sorted(str(key) for key in unknown))
+        raise WalletRegistryError(f"{where} has unknown keys: {names}")
+    patterns = tuple(_pattern_list(item.get("patterns"), f"{where}.patterns"))
+    if not patterns:
+        patterns = (name.casefold(),)
+    same_only = False
+    if "same_asset_only" in item:
+        same_only = _parse_bool(item["same_asset_only"], f"{where}.same_asset_only")
+    return BridgeRoute(name=name, same_asset_only=same_only, patterns=patterns)
+
+
+def _load_match_overrides(value: object) -> MatchOverrides:
+    item = _require_mapping(value, "match_overrides")
+    unknown = set(item) - {"leave_unmatched", "force_pair"}
+    if unknown:
+        names = ", ".join(sorted(str(key) for key in unknown))
+        raise WalletRegistryError(f"match_overrides has unknown keys: {names}")
+    return MatchOverrides(
+        leave_unmatched=_load_leave_unmatched(item.get("leave_unmatched")),
+        force_pair=_load_force_pairs(item.get("force_pair")),
+    )
+
+
+def _load_leave_unmatched(value: object) -> List[LeaveUnmatched]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise WalletRegistryError("match_overrides.leave_unmatched must be a list")
+    return [_load_leave_entry(raw, index) for index, raw in enumerate(value, start=1)]
+
+
+def _load_leave_entry(value: object, index: int) -> LeaveUnmatched:
+    where = f"match_overrides.leave_unmatched[{index}]"
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            raise WalletRegistryError(f"{where} needs a tx hash")
+        return LeaveUnmatched(tx_hash=text)
+    item = _require_mapping(value, where)
+    unknown = set(item) - {"tx_hash", "asset"}
+    if unknown:
+        names = ", ".join(sorted(str(key) for key in unknown))
+        raise WalletRegistryError(f"{where} has unknown keys: {names}")
+    tx_hash = _optional_str(item, "tx_hash", where)
+    if not tx_hash:
+        raise WalletRegistryError(f"{where} needs a tx_hash")
+    return LeaveUnmatched(tx_hash=tx_hash, asset=_optional_str(item, "asset", where).upper())
+
+
+def _load_force_pairs(value: object) -> List[ForcePair]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise WalletRegistryError("match_overrides.force_pair must be a list")
+    rules = []
+    for index, raw in enumerate(value, start=1):
+        where = f"match_overrides.force_pair[{index}]"
+        item = _require_mapping(raw, where)
+        unknown = set(item) - {"out", "in", "type"}
+        if unknown:
+            names = ", ".join(sorted(str(key) for key in unknown))
+            raise WalletRegistryError(f"{where} has unknown keys: {names}")
+        out_hash = _optional_str(item, "out", where)
+        in_hash = _optional_str(item, "in", where)
+        kind = _optional_str(item, "type", where).casefold()
+        if not out_hash or not in_hash:
+            raise WalletRegistryError(f"{where} needs out and in")
+        if kind not in ("transfer", "exchange"):
+            raise WalletRegistryError(f"{where}.type must be transfer or exchange")
+        rules.append(ForcePair(out_hash=out_hash, in_hash=in_hash, kind=kind))
+    return rules
 
 
 def _load_utilities(value: object) -> List[UtilityRule]:

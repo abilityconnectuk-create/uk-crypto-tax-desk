@@ -4,7 +4,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from typing import List
+from typing import List, Set
 
 
 @dataclass
@@ -38,3 +38,5 @@ class ReconcileResult:
     spam: List[ReviewRow] = field(default_factory=list)
     queue: List[ReviewRow] = field(default_factory=list)
     match_seq: int = 0
+    # Rows an explicit override has already settled. Later rules leave them alone.
+    pinned: Set[int] = field(default_factory=set)
