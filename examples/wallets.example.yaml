@@ -42,6 +42,18 @@ match:
   # the group (a wrap or unwrap) becomes a transfer rather than a disposal.
   # HMRC has not said that wrapping is not a disposal.
   share_pools: false
+  # Off by default. When true, one hash on one wallet becomes a trade only when,
+  # after fee and dust legs are set aside, exactly one token goes out and a
+  # different token comes in. The fee's local value is added to the acquired cost.
+  # A hash that also names another wallet listed under own is left for transfers.
+  # An out with no principal in stays unmatched. An LP token stays on review.
+  same_wallet_swaps: false
+  # Used only when same_wallet_swaps is true. Empty means every wallet or chain.
+  # A row has to match every list you set. These names are samples.
+  same_wallet_swap_wallets:
+    - Ledger
+  same_wallet_swap_chains:
+    - sui
 
 # Symbols that may be two sides of one internal move. The first symbol is the
 # shared pool name when match.share_pools is true. Otherwise symbols are not rewritten.
@@ -59,3 +71,180 @@ spam:
     - USDC.e
   patterns:
     - claim
+    - "visit"
+    - "airdrop claim"
+
+# Official token contracts. A row that uses the asset or one of its names, and
+# carries a different contract, is address-poisoning spam. The name is not merged
+# into the official pool. These addresses are fake.
+official_contracts:
+  - asset: USDT
+    chain: ethereum
+    address: "0x0000000000000000000000000000000000000a11"
+    names:
+      - Tether USD
+
+# Lookalike addresses used by address-poisoning. A source or destination match
+# is spam even when the ticker is an official asset.
+poison_addresses:
+  - label: Example lookalike
+    chain: ethereum
+    address: "0x0000000000000000000000000000000000000b0b"
+
+# Fake CEX deposit addresses. A send here is a transfer to the venue.
+venues:
+  - label: Example CEX deposit
+    chain: ethereum
+    address: "0x00000000000000000000000000000000000000c1"
+
+# Fake routers, LP tokens and lending contracts.
+# tax_treatment below is not a confirmed rule. Leave it as review until an accountant agrees.
+contracts:
+  - label: Example router
+    chain: ethereum
+    category: swap
+    address: "0x00000000000000000000000000000000000000d1"
+  - label: Example LP
+    chain: ethereum
+    category: lp
+    address: "0x00000000000000000000000000000000000000d2"
+  - label: Example lending
+    chain: ethereum
+    category: collateral
+    address: "0x00000000000000000000000000000000000000d3"
+  - label: Example stake
+    chain: ethereum
+    category: stake
+    address: "0x00000000000000000000000000000000000000d4"
+
+bridges:
+  patterns:
+    - bridge
+  contracts:
+    - label: Example bridge
+      chain: ethereum
+      category: bridge
+      address: "0x00000000000000000000000000000000000000b1"
+  # A named route. The name is matched in the description, tag, note, destination,
+  # or contract when patterns is omitted. same_asset_only refuses a token change.
+  mayan:
+    same_asset_only: true
+
+# Applied before the other matchers. Hashes below are fake.
+match_overrides:
+  leave_unmatched:
+    - "0x1111111111111111111111111111111111111111"
+    - tx_hash: "0x2222222222222222222222222222222222222222"
+      asset: USDT
+  force_pair:
+    - out: "0x3333333333333333333333333333333333333333"
+      out_asset: USDC
+      in: "0x4444444444444444444444444444444444444444"
+      in_asset: WIDGET
+      type: transfer
+
+# Longer patterns win. income, dust and ignore are the only treatments.
+utilities:
+  - match: launchpool
+    treatment: income
+  - match: dust conversion
+    treatment: dust
+  - match: create-token-account
+    treatment: ignore
+
+margin:
+  asset_suffixes:
+    - USDTM
+    - PERP
+  patterns:
+    - realized gain
+    - daily total
+    - bot daily
+
+# LP, collateral and stake are deliberately not hard-coded. review | transfer | disposal.
+tax_treatment:
+  lp: review
+  collateral: review
+  stake: review
+
+# Off unless listed. A deposit of `deposit` to `venue` (an address or a wallet
+# name) with a same-hash in-leg of `receipt` is one exchange. A deposit with no
+# receipt leg stays on review. The address below is fake.
+receipt_tokens:
+  - venue: "0x0000000000000000000000000000000000000e01"
+    deposit: USDC
+    receipt: Z0USDC
+
+# Extra LP and receipt symbols. Built-in patterns already catch CAKE-LP, SLP,
+# BPT and UNI-V2. These add to that list; they do not replace it.
+lp_tokens:
+  symbols:
+    - UNI-V2
+  patterns:
+    - "-LP"
+
+official_assets:
+  - USDT
+  - BTC
+  - ETH
+
+# Koinly prints "BTC (Bitcoin)". That label matches BTC. A different name in the
+# brackets, such as "BTC (Bear Trump Coin)", stays a separate asset.
+# Omit this block to use the same built-in names.
+asset_names:
+  BTC:
+    - Bitcoin
+    - BTC (Bitcoin)
+  ETH:
+    - Ethereum
+    - ETH (Ethereum)
+  USDT:
+    - Tether
+    - USDT (Tether)
+# "Tether USD" is not a built-in name. Add it under USDT only when that exact
+# label is official USDT. A lookalike such as "USDT (Tether USD)" stays separate
+# until this list names it.
+
+reconcile:
+  quantity_epsilon: "0.00000001"
+  cost_band_ratio: "0.005"
+  cost_band_abs: "1"
+  gains_band_ratio: "0.01"
+  income_abs: "0.01"
+
+# Rows excluded from the T1 wallet-count comparison. Reason is required.
+count_exceptions:
+  - reason: sample bot wallet excluded from the count
+    wallet: Example Bot
+
+# Stablecoin sent to one of these payees is a disposal at pool cost. The local
+# value is held as a pending allocation. It is not a spend and not a trade.
+# assets defaults to USDT and USDC when omitted. A refund names one payment.
+# These addresses are fake.
+allocations:
+  - label: Example sale
+    chain: ethereum
+    payees:
+      - "0x0000000000000000000000000000000000000c01"
+    assets:
+      - USDT
+      - USDC
+    refunds:
+      - payment: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        refund: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+# Manual only. Payments and claim rows are hashes or ids. The pending value is
+# split across the claims by quantity. Unlisted lots stay pending.
+allocation_links:
+  - payments:
+      - "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    asset: WIDGET
+    claims:
+      - "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      - "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+
+# Leftovers the integrity check may ignore. Reason is required.
+# A tx_hash, or a date plus asset plus amount, is required.
+review_exceptions:
+  - reason: sample leftover already checked by hand
+    tx_hash: "0x0000000000000000000000000000000000000001"

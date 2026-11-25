@@ -49,6 +49,11 @@ KOINLY_D_MAPPING = {
     "margin_loan": TrType.LOAN,
     "Realized gain": TrType.MARGIN_GAIN,
     "realized_gain": TrType.MARGIN_GAIN,
+    # A received funding or futures fee is a margin rebate, not a deposit.
+    "Funding fee": TrType.MARGIN_FEE_REBATE,
+    "funding_fee": TrType.MARGIN_FEE_REBATE,
+    "Futures fee": TrType.MARGIN_FEE_REBATE,
+    "futures_fee": TrType.MARGIN_FEE_REBATE,
     # Removing liquidity is an acquisition at the Koinly value, not income.
     # Confirm with an accountant: this assumes the matching liquidity-in was a disposal.
     "Liquidity out": TrType.GIFT_RECEIVED,
@@ -74,12 +79,18 @@ KOINLY_W_MAPPING = {
     "loan_fee": TrType.LOAN_INTEREST,
     "Margin fee": TrType.MARGIN_FEE,
     "margin_fee": TrType.MARGIN_FEE,
+    "Futures fee": TrType.MARGIN_FEE,
+    "futures_fee": TrType.MARGIN_FEE,
+    "Funding fee": TrType.MARGIN_FEE,
+    "funding_fee": TrType.MARGIN_FEE,
     "Loan repayment": TrType.LOAN_REPAYMENT,
     "loan_repayment": TrType.LOAN_REPAYMENT,
     "Margin repayment": TrType.LOAN_REPAYMENT,
     "margin_repayment": TrType.LOAN_REPAYMENT,
     "Realized gain": TrType.MARGIN_LOSS,
     "realized_gain": TrType.MARGIN_LOSS,
+    "Realized loss": TrType.MARGIN_LOSS,
+    "realized_loss": TrType.MARGIN_LOSS,
     # Adding liquidity and standalone fees are disposals. Liquidity-pool tax
     # treatment is not settled; confirm before relying on these rows.
     "Liquidity in": TrType.SPEND,
@@ -123,7 +134,7 @@ def _lookup_tag(mapping: Dict[str, TrType], tag: str) -> Optional[TrType]:
 def _local_fiat_value(
     asset: str, quantity: Optional[Decimal], converted: Optional[Decimal]
 ) -> Optional[Decimal]:
-    # After FX, a GBP amount's converted value often no longer equals the quantity.
+    # After foreign exchange, a pound amount's converted value often no longer equals the quantity.
     # The quantity of the local currency is the value.
     if quantity is not None and asset == config.ccy:
         return quantity

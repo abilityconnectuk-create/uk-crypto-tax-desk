@@ -365,6 +365,7 @@ class Buy(TransactionBase):  # pylint: disable=too-many-instance-attributes
         TrType.INCOME,
         TrType.GIFT_RECEIVED,
         TrType.REVIEW_ACQUISITION,
+        TrType.ALLOCATION_CLAIM,
         TrType.FORK,
         TrType.AIRDROP,
         TrType.REFERRAL,
@@ -504,6 +505,7 @@ class Sell(TransactionBase):  # pylint: disable=too-many-instance-attributes
         TrType.LOAN_INTEREST,
         TrType.MARGIN_LOSS,
         TrType.MARGIN_FEE,
+        TrType.ALLOCATION,
         TrType.TRADE,
     }
 

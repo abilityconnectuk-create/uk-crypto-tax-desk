@@ -20,6 +20,7 @@ from .exceptions import (
     TransactionParserError,
     UnexpectedDataError,
 )
+from .review_queue import QueueItem
 from .t_record import TransactionRecord
 from .tax import TaxCalculator
 from .transactions import Buy, Sell
@@ -57,6 +58,13 @@ class TransactionRow:
     review_assumed_count = 0
     skipped_unmapped_count = 0
     skipped_spam_count = 0
+    skipped_ignored_count = 0
+    needs_review_seen = 0
+    review_imported_count = 0
+    review_imported_trade_count = 0
+    review_dropped_count = 0
+    review_failed_count = 0
+    review_queue: List["QueueItem"] = []
 
     HEADER = [
         "Type",
@@ -423,6 +431,30 @@ class TransactionRow:
             fee_asset=FieldRequired.OPTIONAL,
             fee_value=FieldRequired.OPTIONAL,
         ),
+        TrType.ALLOCATION: FieldValidation(
+            t_type=FieldRequired.MANDATORY,
+            buy_quantity=FieldRequired.NOT_REQUIRED,
+            buy_asset=FieldRequired.NOT_REQUIRED,
+            buy_value=FieldRequired.NOT_REQUIRED,
+            sell_quantity=FieldRequired.MANDATORY,
+            sell_asset=FieldRequired.MANDATORY,
+            sell_value=FieldRequired.OPTIONAL,
+            fee_quantity=FieldRequired.OPTIONAL,
+            fee_asset=FieldRequired.OPTIONAL,
+            fee_value=FieldRequired.OPTIONAL,
+        ),
+        TrType.ALLOCATION_CLAIM: FieldValidation(
+            t_type=FieldRequired.MANDATORY,
+            buy_quantity=FieldRequired.MANDATORY,
+            buy_asset=FieldRequired.MANDATORY,
+            buy_value=FieldRequired.MANDATORY,
+            sell_quantity=FieldRequired.NOT_REQUIRED,
+            sell_asset=FieldRequired.NOT_REQUIRED,
+            sell_value=FieldRequired.NOT_REQUIRED,
+            fee_quantity=FieldRequired.OPTIONAL,
+            fee_asset=FieldRequired.OPTIONAL,
+            fee_value=FieldRequired.OPTIONAL,
+        ),
         TrType.TRADE: FieldValidation(
             t_type=FieldRequired.MANDATORY,
             buy_quantity=FieldRequired.MANDATORY,
@@ -452,6 +484,7 @@ class TransactionRow:
         self.t_record: Optional[TransactionRecord] = None
         self.tx_raw: Optional[TxRaw] = None
         self.failure: Optional[TransactionParserError] = None
+        self.review_outcome = ""
 
     def parse(self) -> None:
         if all(not self.row[i] for i in range(len(self.row))):
@@ -557,6 +590,7 @@ class TransactionRow:
             Note(self.row_dict["Note"]),
             self,
         )
+        self._account_imported_review()
 
     def _resolve_type(self) -> TrType:
         raw = self.row_dict["Type"]
@@ -569,7 +603,12 @@ class TransactionRow:
         if raw == "_Possible-Spam":
             TransactionRow.skipped_spam_count += 1
             raise SkippedTransaction(self.HEADER.index("Type"), "Type", raw) from exc
+        if raw == "_Ignored":
+            TransactionRow.skipped_ignored_count += 1
+            raise SkippedTransaction(self.HEADER.index("Type"), "Type", raw) from exc
         treatment = str(config.review_rows)
+        if treatment == "conservative":
+            return self._conservative_review(exc, raw)
         has_buy = bool(self.row_dict["Buy Quantity"] or self.row_dict["Buy Asset"])
         has_sell = bool(self.row_dict["Sell Quantity"] or self.row_dict["Sell Asset"])
         if has_buy and has_sell:
@@ -595,6 +634,89 @@ class TransactionRow:
                 return TrType.GIFT_RECEIVED
             return TrType.DEPOSIT
         raise SkippedTransaction(self.HEADER.index("Type"), "Type", raw) from exc
+
+    def _conservative_review(self, exc: ValueError, raw: str) -> TrType:
+        """Deposits get a market cost. Withdrawals stay on the review queue.
+
+        Every row is counted: left on the queue, imported, or dropped. The
+        warning later checks that those counts add up to the rows seen.
+        """
+        TransactionRow.needs_review_seen += 1
+        has_buy = bool(self.row_dict["Buy Quantity"] or self.row_dict["Buy Asset"])
+        has_sell = bool(self.row_dict["Sell Quantity"] or self.row_dict["Sell Asset"])
+        if has_buy and has_sell:
+            self.review_outcome = "trade"
+            TransactionRow.review_assumed_count += 1
+            return TrType.TRADE
+        if has_sell and not has_buy:
+            self.review_outcome = "queued"
+            TransactionRow.review_queue.append(self._queue_item("sell"))
+            TransactionRow.skipped_unmapped_count += 1
+            raise SkippedTransaction(
+                self.HEADER.index("Type"),
+                "Type",
+                f"{raw} (review queue: unmatched withdrawal)",
+            ) from exc
+        if has_buy and not has_sell:
+            self.review_outcome = "acquisition"
+            TransactionRow.review_assumed_count += 1
+            return TrType.REVIEW_ACQUISITION
+        self.review_outcome = "dropped"
+        TransactionRow.review_dropped_count += 1
+        raise SkippedTransaction(
+            self.HEADER.index("Type"),
+            "Type",
+            f"{raw} (review queue: no quantity to import)",
+        ) from exc
+
+    def _account_imported_review(self) -> None:
+        if self.review_outcome == "acquisition":
+            TransactionRow.review_imported_count += 1
+        elif self.review_outcome == "trade":
+            TransactionRow.review_imported_trade_count += 1
+
+    @classmethod
+    def review_reconciliation(cls) -> Dict[str, int]:
+        """Counts that must add up for every unknown-type row in the file."""
+        queued = len(cls.review_queue)
+        accounted = (
+            queued
+            + cls.review_imported_count
+            + cls.review_imported_trade_count
+            + cls.review_dropped_count
+            + cls.review_failed_count
+        )
+        return {
+            "seen": cls.needs_review_seen,
+            "queued": queued,
+            "imported_acquisitions": cls.review_imported_count,
+            "imported_trades": cls.review_imported_trade_count,
+            "dropped": cls.review_dropped_count,
+            "failed": cls.review_failed_count,
+            "accounted": accounted,
+        }
+
+    def _queue_item(self, side: str) -> QueueItem:
+        if side == "sell":
+            asset = self.row_dict["Sell Asset"]
+            quantity = self.row_dict["Sell Quantity"]
+        else:
+            asset = self.row_dict["Buy Asset"]
+            quantity = self.row_dict["Buy Quantity"]
+        note = self.row_dict["Note"]
+        tx_hash = ""
+        marker = "tx "
+        if marker in note:
+            tx_hash = note.rsplit(marker, 1)[-1].split("|", 1)[0].strip()
+        return QueueItem(
+            timestamp=self.row_dict["Timestamp"],
+            asset=asset,
+            quantity=quantity,
+            wallet=self.row_dict["Wallet"],
+            tx_hash=tx_hash,
+            note=note,
+            disposition="review-queue",
+        )
 
     def parse_timestamp(self) -> Timestamp:
         try:

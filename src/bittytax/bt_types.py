@@ -52,6 +52,8 @@ class TrType(Enum):
     LOAN_INTEREST = "Loan-Interest"
     MARGIN_LOSS = "Margin-Loss"
     MARGIN_FEE = "Margin-Fee"
+    ALLOCATION = "Allocation"
+    ALLOCATION_CLAIM = "Allocation-Claim"
     TRADE = "Trade"
 
 
@@ -104,6 +106,7 @@ BUY_TYPES = (
     TrType.LOAN,
     TrType.MARGIN_GAIN,
     TrType.MARGIN_FEE_REBATE,
+    TrType.ALLOCATION_CLAIM,
     TrType.TRADE,
 )
 
@@ -119,6 +122,7 @@ SELL_TYPES = (
     TrType.LOAN_INTEREST,
     TrType.MARGIN_LOSS,
     TrType.MARGIN_FEE,
+    TrType.ALLOCATION,
     TrType.TRADE,
 )
 

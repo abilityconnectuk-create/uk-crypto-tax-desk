@@ -8,13 +8,47 @@ The price data cache format has been updated to correctly distinguish assets tha
 
 The new `price_via_btc` config option may not exist in your config file. If it is missing, BittyTax keeps the legacy BTC-intermediate behaviour for backward compatibility. Add `price_via_btc: False` to your config if you want historic prices to use direct local currency lookups.
 
+### Added
+- Conversion tool: `match_overrides` holds listed hashes unmatched and can force a transfer or an exchange before the other matchers. Both are written to the transfer summary. `bridges.<name>.same_asset_only` refuses a token-change in-leg on that route, so a missing receive stays a missing destination.
+- Conversion tool: `receipt_tokens` (default empty) books a venue deposit as an exchange when the same hash receives the receipt asset. A deposit with no receipt leg stays on review.
+- Conversion tool: a bridge with several in-legs takes the closest unused one whose amount fits. The same asset is preferred when both in-legs fit. A token change is an exchange and the same asset is a transfer.
+- Conversion tool: `allocations` holds a stablecoin payment to a listed payee as a pending lot. The payment is an `Allocation` disposal at pool cost, not a spend or a trade. A short pool does not set the local value equal to that cost. `allocation_links` is manual and splits the pending value across named claim rows by quantity. A named refund from the payee reduces that lot. Unlinked lots are listed in `pending_allocations` and are not a loss or a negligible-value claim.
+- Conversion tool: `match.same_wallet_swap_wallets` and `match.same_wallet_swap_chains` limit same-wallet swaps to those wallets or chains when the switch is on.
+- Conversion tool: `official_contracts` and `poison_addresses` mark address-poisoning rows as spam. A ticker that names an official asset but uses another contract, or a row whose source or destination is a configured poison address, is dropped. It is not a disposal, a transfer, or a wallet movement, and it is not merged into the official pool. The possible-spam file records the reason.
+- Conversion tool: `contracts` category `stake` is a configurable escrow, with `tax_treatment.stake` defaulting to `review`. No stake tax treatment is hard-coded.
+- Conversion tool: `match.same_wallet_swaps` (default off) pairs same-hash, different-asset legs on one wallet with a blank destination into one logged trade. LP and receipt tokens stay on the review queue.
+
 ### Fixed
+- Conversion tool: Koinly tags `Futures fee` and `Funding fee` are margin fees (a received fee is a margin-fee rebate). `Realized loss` on a withdrawal is a margin loss, as `Realized gain` already is.
+- Conversion tool: `force_pair` accepts optional `out_asset` and `in_asset`, so a hash that also has a fee leg pairs only the named asset. A same-asset bridge route also matches the destination and the contract.
+- Conversion tool: a bridge from USDT to USDC is an exchange when both local values are known and within tolerance. The same asset is still preferred when that in-leg also fits. A token change no longer matches on quantity alone, so a receive with no value stays off the pair and the send remains a missing destination.
+- Conversion tool: a same-wallet swap no longer treats a dust receive, such as 0.0004 SUI against 3,424 USDT, as the acquired token. A tiny native-coin send is not a swap unless both local values are principal. A token name with a hash id stays on review.
+- Conversion tool: `receipt_tokens` is applied before collateral classification, so a same-hash receipt leg is an exchange. A deposit with no receipt leg still follows the collateral review.
+- Conversion tool: a bridge with no chain column uses the wallet entry's chain or any own wallet, and matches local value within tolerance. USDT and USDC stay separate, and an in-leg is not reused.
+- Conversion tool: `match.same_wallet_swaps` pairs a hash only when one wallet sends exactly one principal token and receives a different one. A hash on two of your own wallets is left for transfers. An out-only hash stays unmatched. The fee leg's local value is added to the acquired token's cost.
+- Conversion tool: a same-wallet swap no longer fails after the pair is merged. The fee check skips a consumed leg, including one whose record was cleared, so a 0.004 fee beside a 1,000 USDT to 458 sSUI swap still writes the output.
+- Conversion tool: `match.same_wallet_swaps` no longer picks a dust or fee leg, such as 0.004 of a gas token, just because the token-count gap is smaller. The large withdrawal stays the swap.
+- Reconciliation: a holdings summary row named Total, Totals, Grand Total or Subtotal is not compared as an asset.
+- Reconciliation: pool cost compares the union of the Koinly costs and the engine pool, so an engine-only leftover pool fails P2.
+- Reconciliation: yearly income, other gains and net gains are compared only for years present in the Koinly report. A snapshot year with no report is listed in `skipped_years` and is not treated as zero.
+- Reconciliation: the built-in asset names no longer alias `Tether USD` to USDT, so `USDT (Tether USD)` stays separate unless a local `asset_names` entry lists that name.
+- Reconciliation: a paired transfer written as one engine row counts as both a withdrawal and a deposit in T2. Two rows that share the match keep their own types.
+- Accounting tool: the 5 April Section 104 snapshot is taken in time order and includes the final open tax year, so a later-named asset bought only in an earlier year is not dropped.
+- Reconciliation: an ISO holdings title such as `2025-04-05 23:59` stays 5 April 2025 (tax year 2024/25) instead of being read as 4 May.
+- Reconciliation: `asset_names` maps an official Koinly label such as `BTC (Bitcoin)` onto `BTC`. A different name in the brackets is not merged.
+- Reconciliation: yearly income uses the value column before the token amount.
+- Reconciliation: net capital gains are compared with spot gains plus the margin net, because the Koinly capital-gains file includes futures.
+- Reconciliation: missing cost is taken from a numeric column, a Missing cost basis mark, or a zero or blank cost on a disposal.
+- Reconciliation: wallet and type counts follow the converter. A bulk-edit transfer is one trade on the To wallet. Income and margin tags are counted as income and margin.
+- Conversion tool: transfer pairing looks up candidates by asset and time window, and by transaction hash.
+- Accounting tool: a failed integrity check exits with status 1.
+- Accounting tool: every unknown-type row is imported or counted, and the warning reconciles those counts.
 - Koinly parser: amounts with thousands separators (for example 1,234.56) are parsed, and a local-currency amount keeps its quantity as the value after FX conversion.
 - Price tool: CoinGecko latest price returns no price when `current_price` is null, instead of failing the report.
 - Accounting tool: a disposal larger than the Section 104 pool no longer drives pool cost negative. Each short disposal is listed with both the missing cost (the pool average times the short quantity, or the market value when the pool was empty) and the proceeds of that quantity.
 - Accounting tool: an unmapped transaction type is skipped with a warning instead of aborting the import. Possible-spam rows are counted once, not warned on every row.
 - Conversion tool: a symbol can belong to one wrap group and one liquid-staking group, or a group can list `members` and `liquid_members`. Spam patterns are not stripped, so a quoted whitespace lookalike still matches.
-- Conversion tool: the needs-review warning names `--review-rows market` as well as `disposal` and `transfer`.
+- Conversion tool: unmatched withdrawals are no longer treated as silent transfers under the default. `--review-as conservative` leaves them on a review queue, and the integrity check fails until that queue is empty or every leftover is excepted.
 - Price tool: live price requests use a connect and read timeout, and retry waits are capped. The tax report is written before holdings are valued. `--skip-holdings` skips that valuation.
 - Coinbase parser: fixed negative values for Advanced Trade Sells.
 - MEXC parser: fees for spot trades should always be the quote asset.
@@ -30,6 +64,9 @@ The new `price_via_btc` config option may not exist in your config file. If it i
 - Price tool: Rate-limit was not sleeping unless running in debug.
 - Accounting tool: fixed `audit_hide_empty` filtering of empty wallet balances after staking support was added, preserving non-zero staked balances. ([#507](https://github.com/BittyTax/BittyTax/issues/507))
 ### Added
+- Conversion tool: transfer classification beyond the 24 hour amount match. Transaction hashes are paired after `0x` and case normalisation. An exchange id can pair with a chain hash when the destination, amount and time agree. A fuzzy own-wallet match needs two of hash, address, and amount-plus-time, inside a configurable window (48 hours by default, tighter for a configured exchange account, wider for a bridge). A bridge of the same token is a transfer; a bridge of a different token is an exchange; a bridge with no receive is flagged `missing destination-chain deposit`. Venues, routers, LP and lending contracts, futures tickers, fiat movements, spam lookalikes and exchange utilities are classified from the wallet file. LP and collateral tax treatment is a config flag and defaults to review. Every decision is written to the transfer summary.
+- Accounting tool: `--year-end-snapshot` writes the Section 104 pool at each 5 April (Europe/London), with quantity and pooled cost in the configured local currency, and flags a timestamp whose UTC date and London date fall in different tax years.
+- Accounting tool: `bittytax reconcile` compares a private Koinly export folder with the converted records and that snapshot, and writes a JSON pass/fail report (T1, T2, P1, P2, Y1, Y2, Y3, Y4).
 - Conversion tool: optional wallet registry and transfer matching (`--wallets`, `--match-transfers`). Sends to your own addresses become transfers, withdrawals can be paired with deposits (including configured token groups such as WETH/ETH), and unmatched untagged withdrawals and deposits are reported for review instead of being treated as gifts. `--legacy-gift-withdrawals` keeps the previous gift treatment. `--review-as` and `bittytax --review-rows` can still produce a report, with a warning and a count. `match.share_pools` optionally pools wrapped tokens and treats a one-to-one wrap as a transfer.
 - Koinly parser: `Liquidity in`, `Liquidity out`, `Multi trade` and `Other fee` tags are mapped to known transaction types.
 - Coinbase parser: added "Cash to Savings", "Savings to Cash", "Interest payout" and "Retail Simple Dust" transaction types.

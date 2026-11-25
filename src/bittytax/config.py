@@ -60,10 +60,13 @@ class Config:
         "price_via_btc": True,
         "usernames": [],
         "coinbase_zero_fees_are_gifts": False,
-        # reject: _Needs-Review fails the import.
-        # disposal: treat those rows as Gift-Sent / Gift-Received.
-        # transfer: treat those rows as Withdrawal / Deposit.
-        "review_rows": "reject",
+        # conservative: unmatched deposits are acquired at market value and
+        # unmatched withdrawals stay on a review queue. The integrity check
+        # fails until that queue is empty or every leftover is excepted.
+        # reject: skip _Needs-Review with a warning.
+        # market: deposits at market value, withdrawals treated as transfers.
+        # disposal: gifts. transfer: both sides are transfers.
+        "review_rows": "conservative",
         "binance_multi_bnb_split_even": False,
         "binance_statements_only": False,
     }

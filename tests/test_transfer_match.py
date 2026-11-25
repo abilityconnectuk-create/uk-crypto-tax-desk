@@ -558,14 +558,15 @@ def test_existing_withdrawal_and_deposit_keep_their_quantities() -> None:
     assert result.review == []
 
 
-def test_closest_amount_beats_a_shared_tx_hash() -> None:
+def test_shared_tx_hash_beats_a_closer_amount() -> None:
     sent = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Exchange", tx_hash="0xhash")
     closer = _make(TrType.GIFT_RECEIVED, BASE, "ETH", "1", "Ledger", tx_hash="")
     hashed = _make(TrType.GIFT_RECEIVED, BASE, "ETH", "0.99", "Cold", tx_hash="0xHASH")
-    _run(sent, closer, hashed)
-    assert closer.t_record is not None and closer.t_record.t_type is TrType.DEPOSIT
-    assert hashed.t_record is not None and hashed.t_record.t_type == NEEDS_REVIEW_TYPE
-    assert sent.t_record is not None and sent.t_record.sell_quantity == Decimal("1")
+    result = _run(sent, closer, hashed)
+    assert hashed.t_record is not None and hashed.t_record.t_type is TrType.DEPOSIT
+    assert closer.t_record is not None and closer.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert sent.t_record is not None and sent.t_record.t_type is TrType.WITHDRAWAL
+    assert "matched" in _actions(result)
 
 
 def test_trade_rows_are_ignored() -> None:
@@ -602,10 +603,11 @@ def test_report_files_list_the_review_columns(tmp_path: Path) -> None:
     ]
     assert rows[1][1:] == ["ETH", "4", "Exchange", OTHER, "0xreview", "", "needs-review"]
 
-    stem, review, spam = reconciliation_report_paths(str(tmp_path / "records.xlsx"))
+    stem, review, spam, queue = reconciliation_report_paths(str(tmp_path / "records.xlsx"))
     assert stem.endswith("records-transfer-summary.csv")
     assert review.endswith("records-needs-review.csv")
     assert spam.endswith("records-possible-spam.csv")
+    assert queue.endswith("records-review-queue.csv")
 
 
 def test_example_registry_loads() -> None:
@@ -621,11 +623,52 @@ def test_example_registry_loads() -> None:
     assert registry.match.token_groups[0].symbols == ("ETH", "WETH")
     assert registry.match.token_groups[0].liquid_symbols == ("STETH",)
     assert registry.match.token_groups[1].symbols == ("BTC", "CBBTC")
+    assert registry.venues[0].address.endswith("00c1")
+    assert registry.contracts[1].category == "lp"
+    assert registry.tax_treatment.lp == "review"
+    assert registry.tax_treatment.collateral == "review"
+    assert registry.tax_treatment.stake == "review"
+    assert registry.match.same_wallet_swaps is False
+    assert registry.match.same_wallet_swap_wallets == ("ledger",)
+    assert registry.match.same_wallet_swap_chains == ("sui",)
+    assert registry.allocations[0].label == "Example sale"
+    assert registry.allocations[0].payees[0].endswith("0c01")
+    assert registry.allocations[0].assets == ("USDT", "USDC")
+    assert registry.allocations[0].refunds[0].refund.endswith("bb")
+    assert registry.allocation_links[0].asset == "WIDGET"
+    assert len(registry.allocation_links[0].claims) == 2
+    assert registry.receipt_tokens[0].venue.endswith("0e01")
+    assert registry.receipt_tokens[0].deposit == "USDC"
+    assert registry.receipt_tokens[0].receipt == "Z0USDC"
+    assert registry.bridges.routes[0].name == "mayan"
+    assert registry.bridges.routes[0].same_asset_only is True
+    assert registry.bridges.routes[0].patterns == ("mayan",)
+    assert registry.match_overrides.leave_unmatched[0].tx_hash.endswith("1111")
+    assert registry.match_overrides.leave_unmatched[1].asset == "USDT"
+    assert registry.match_overrides.force_pair[0].kind == "transfer"
+    assert registry.match_overrides.force_pair[0].out_asset == "USDC"
+    assert registry.match_overrides.force_pair[0].in_asset == "WIDGET"
+    assert registry.official_contracts[0].asset == "USDT"
+    assert registry.official_contracts[0].names == ("Tether USD",)
+    assert registry.poison_addresses[0].address.endswith("0b0b")
+    assert registry.contracts[3].category == "stake"
+    assert registry.margin.suffixes == ("USDTM", "PERP")
+    assert registry.count_exceptions[0].wallet == "Example Bot"
 
 
 def test_registry_rejects_unknown_keys(tmp_path: Path) -> None:
     path = tmp_path / "wallets.yaml"
     path.write_text("own:\n  - label: X\n    addr: '0x1'\n", encoding="utf-8")
+    with pytest.raises(WalletRegistryError):
+        load_wallet_registry(str(path))
+
+
+def test_match_overrides_reject_an_unknown_pair_type(tmp_path: Path) -> None:
+    path = tmp_path / "wallets.yaml"
+    path.write_text(
+        "match_overrides:\n  force_pair:\n    - {out: a, in: b, type: swap}\n",
+        encoding="utf-8",
+    )
     with pytest.raises(WalletRegistryError):
         load_wallet_registry(str(path))
 
@@ -669,6 +712,79 @@ def test_koinly_tax_report_own_address_is_rewritten() -> None:
     assert result.review == []
     assert result.summary[0].action == "own-address"
     assert result.summary[0].tx_hash == "0xparsed"
+
+
+def test_wallet_scoped_swap_runs_when_the_input_has_no_chain_column(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config.ccy = "GBP"
+    DataFile.data_files.clear()
+    DataFile.data_files_ordered.clear()
+    assert "Chain" not in _TAX_HEADER
+    try:
+        wallet_path = tmp_path / "wallets.yaml"
+        wallet_path.write_text(
+            "match:\n  same_wallet_swaps: true\n  same_wallet_swap_wallets:\n    - Ledger\n",
+            encoding="utf-8",
+        )
+        source = tmp_path / "koinly.csv"
+        ledger_hash = "0x" + "11" * 16
+        other_hash = "0x" + "22" * 16
+        with open(source, "w", encoding="utf-8", newline="") as handle:
+            writer = csv.writer(handle, lineterminator="\n")
+            writer.writerow(_TAX_HEADER)
+            writer.writerow(_tax_row("Ledger", "ETH", "1", ledger_hash, outgoing=True))
+            writer.writerow(_tax_row("Ledger", "USDC", "100", ledger_hash, outgoing=False))
+            writer.writerow(_tax_row("Cold", "ETH", "1", other_hash, outgoing=True))
+            writer.writerow(_tax_row("Cold", "USDC", "100", other_hash, outgoing=False))
+        output = tmp_path / "records.csv"
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "bittytax_conv",
+                str(source),
+                "--format",
+                "CSV",
+                "--wallets",
+                str(wallet_path),
+                "-o",
+                str(output),
+            ],
+        )
+        main()
+
+        assert output.is_file() and output.stat().st_size > 0
+        with open(output, encoding="utf-8", newline="") as handle:
+            records = list(csv.DictReader(handle))
+        trades = [row for row in records if row["Type"] == "Trade"]
+        assert len(trades) == 1
+        assert trades[0]["Wallet"] == "Ledger"
+        assert trades[0]["Sell Asset"] == "ETH"
+        assert trades[0]["Sell Quantity"] == "1"
+        assert trades[0]["Buy Asset"] == "USDC"
+        assert trades[0]["Buy Quantity"] == "100"
+        assert all(row["Type"] != "Trade" for row in records if row["Wallet"] == "Cold")
+    finally:
+        DataFile.data_files.clear()
+        DataFile.data_files_ordered.clear()
+
+
+def _tax_row(wallet: str, asset: str, quantity: str, tx_hash: str, outgoing: bool) -> List[str]:
+    values = {column: "" for column in _TAX_HEADER}
+    values["Date"] = "2024-06-01 12:00:00"
+    values["TxHash"] = tx_hash
+    if outgoing:
+        values["Type"] = "crypto_withdrawal"
+        values["Sending Wallet"] = wallet
+        values["Sent Amount"] = quantity
+        values["Sent Currency"] = asset
+    else:
+        values["Type"] = "crypto_deposit"
+        values["Receiving Wallet"] = wallet
+        values["Received Amount"] = quantity
+        values["Received Currency"] = asset
+    return [values[column] for column in _TAX_HEADER]
 
 
 def test_cli_writes_transfers_and_the_review_report(
@@ -766,7 +882,12 @@ def test_cli_writes_transfers_and_the_review_report(
         assert review[0]["Wallet"] == "Exchange"
         assert review[0]["Destination"] == OTHER
         assert review[0]["TxHash"] == "0xunknown"
-        assert review[0]["Disposition"] == "needs-review"
+        assert review[0]["Disposition"] == "review-queue"
+        queue_path = tmp_path / "records-review-queue.csv"
+        with open(queue_path, encoding="utf-8", newline="") as handle:
+            queued = list(csv.DictReader(handle))
+        assert queued[0]["TxHash"] == "0xunknown"
+        assert queued[0]["Disposition"] == "review-queue"
     finally:
         DataFile.data_files.clear()
         DataFile.data_files_ordered.clear()
@@ -1004,9 +1125,9 @@ def test_spam_pattern_keeps_a_whitespace_lookalike(tmp_path: Path) -> None:
     assert result.spam[0].disposition == "possible-spam"
 
 
-def test_converter_warning_recommends_market() -> None:
+def test_converter_warning_names_the_review_queue() -> None:
     sent = _make(TrType.GIFT_SENT, BASE, "ETH", "1", "Exchange", destination=OTHER)
     result = _run(sent)
     message = format_reconciliation_message(result)
-    assert "--review-rows market" in message
-    assert "recommended" in message
+    assert "review queue" in message
+    assert "integrity check" in message

@@ -24,7 +24,14 @@ from .holdings import Holdings
 from .import_records import ImportRecords
 from .price.exceptions import DataSourceApiError, DataSourceError
 from .price.valueasset import ValueAsset
+from .reconcile_koinly import main as reconcile_main
 from .report import ReportLog, ReportPdf
+from .review_queue import (
+    QueueItem,
+    ReviewQueueError,
+    load_review_exceptions,
+    review_queue_failures,
+)
 from .t_record import TransactionRecord
 from .t_row import TransactionRow
 from .tax import CalculateCapitalGains as CCG
@@ -32,6 +39,7 @@ from .tax import TaxCalculator
 from .transactions import TransactionHistory
 from .utils import bt_print, is_compiled
 from .version import __version__
+from .year_end import write_snapshot
 
 if sys.stdout.encoding != "UTF-8":
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
@@ -115,12 +123,24 @@ def _create_arg_parser(version_str: str) -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--review-rows",
-        choices=["reject", "market", "disposal", "transfer"],
+        choices=["conservative", "reject", "market", "disposal", "transfer"],
         default=None,
-        help="how to treat unmatched and unmapped rows. reject (default) skips them "
-        "with a warning. market (recommended) acquires deposits at market value and "
-        "treats withdrawals as transfers. disposal treats both as gifts. "
-        "transfer treats both as transfers. Confirm every row.",
+        help="how to treat unmatched and unmapped rows. conservative (default) "
+        "acquires deposits at market value and leaves withdrawals on the review "
+        "queue. The integrity check fails until that queue is empty or excepted. "
+        "reject skips them. market treats withdrawals as transfers. "
+        "disposal treats both as gifts. transfer treats both as transfers.",
+    )
+    parser.add_argument(
+        "--review-exceptions",
+        type=str,
+        help="YAML list of review-queue rows that are allowed to remain. "
+        "Each entry needs a reason and a tx_hash, or a date, asset and amount.",
+    )
+    parser.add_argument(
+        "--year-end-snapshot",
+        type=str,
+        help="write the Section 104 pool at each 5 April (Europe/London) as JSON",
     )
     parser.add_argument(
         "--skip-holdings",
@@ -161,10 +181,18 @@ def _run(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
 
     if args.review_rows:
         config.config["review_rows"] = args.review_rows
+    if args.review_exceptions:
+        try:
+            config.config["review_exception_rows"] = load_review_exceptions(args.review_exceptions)
+        except ReviewQueueError as exc:
+            parser.exit(message=f"{ERROR} {exc}\n")
+    else:
+        config.config["review_exception_rows"] = []
 
     try:
         transaction_records = _do_import(args.filename)
-        _warn_review_rows()
+        if not _warn_review_rows():
+            parser.exit(1)
     except IOError:
         parser.exit(message=f"{ERROR} File could not be read: {args.filename}\n")
     except ImportFailureError:
@@ -188,14 +216,14 @@ def _run(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     else:
         try:
             tax, value_asset = _do_tax(transaction_records, args.tax_rules, args.skip_integrity)
-            if not args.skip_integrity:
-                int_passed = _do_integrity_check(audit, tax.holdings)
-                if not int_passed:
-                    parser.exit()
-
-            if not args.summary_only:
+            if not args.summary_only or args.year_end_snapshot:
                 tax.process_income()
                 tax.process_margin_trades()
+            if args.year_end_snapshot:
+                _write_year_end_snapshot(args.year_end_snapshot, tax)
+            if not args.skip_integrity:
+                int_passed = _do_integrity_check(audit, tax.holdings)
+                _exit_if_failed(parser, int_passed)
 
             _do_each_tax_year(tax, args.tax_year, args.summary_only)
 
@@ -217,6 +245,9 @@ def _run(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "reconcile":
+        reconcile_main(sys.argv[2:])
+        return
     _init_terminal()
     version_str = _build_version_str()
     parser = _create_arg_parser(version_str)
@@ -266,21 +297,31 @@ def _write_report(
         )
 
 
-def _warn_review_rows() -> None:
+def _exit_if_failed(parser: argparse.ArgumentParser, passed: bool) -> None:
+    """Leave the process with status 1 when a check has failed."""
+    if not passed:
+        parser.exit(1)
+
+
+def _warn_review_rows() -> bool:
     count = TransactionRow.review_assumed_count
     skipped = TransactionRow.skipped_unmapped_count
     if count:
         treatment = str(config.review_rows)
         print(
             f"{WARNING} {count} unmatched or unmapped transaction(s) were treated as "
-            f"{treatment}. Confirm each one before relying on this report. "
-            "The recommended treatment is market: deposits acquired at market value, "
-            "withdrawals left as transfers."
+            f"{treatment}. Confirm each one before relying on this report."
         )
-    if skipped:
+    if skipped and str(config.review_rows) == "conservative":
+        print(
+            f"{WARNING} {skipped} unmatched withdrawal(s) are on the review queue. "
+            "They were not treated as transfers. The integrity check fails until "
+            "the queue is empty or every leftover is in --review-exceptions."
+        )
+    elif skipped:
         print(
             f"{WARNING} {skipped} unmapped transaction(s) were skipped. "
-            "They are not in this calculation. Re-run with --review-rows market to include them."
+            "They are not in this calculation."
         )
     spam = TransactionRow.skipped_spam_count
     if spam:
@@ -288,12 +329,44 @@ def _warn_review_rows() -> None:
             f"{WARNING} {spam} possible-spam transaction(s) were skipped. "
             "They are listed in the possible-spam file, not in this calculation."
         )
+    return _warn_review_reconciliation()
+
+
+def _warn_review_reconciliation() -> bool:
+    """Every unknown-type row is imported or listed. The counts must add up."""
+    totals = TransactionRow.review_reconciliation()
+    seen = totals["seen"]
+    if not seen:
+        return True
+    print(
+        f"{WARNING} review queue reconciliation: {seen} unknown-type row(s): "
+        f"{totals['queued']} left on the tax review queue, "
+        f"{totals['imported_acquisitions']} imported as acquisitions, "
+        f"{totals['imported_trades']} imported as trades, "
+        f"{totals['dropped']} dropped with no quantity, "
+        f"{totals['failed']} failed to import. "
+        f"Accounted {totals['accounted']}."
+    )
+    if totals["accounted"] != seen:
+        print(
+            f"{ERROR} review queue reconciliation does not add up "
+            f"({totals['accounted']} accounted, {seen} seen)."
+        )
+        return False
+    return True
 
 
 def _do_import(filename: str) -> List[TransactionRecord]:
     TransactionRow.review_assumed_count = 0
     TransactionRow.skipped_unmapped_count = 0
     TransactionRow.skipped_spam_count = 0
+    TransactionRow.skipped_ignored_count = 0
+    TransactionRow.needs_review_seen = 0
+    TransactionRow.review_imported_count = 0
+    TransactionRow.review_imported_trade_count = 0
+    TransactionRow.review_dropped_count = 0
+    TransactionRow.review_failed_count = 0
+    TransactionRow.review_queue = []
     import_records = ImportRecords()
 
     if filename:
@@ -347,11 +420,25 @@ def _do_integrity_check(audit: AuditRecords, holdings: Dict[AssetSymbol, Holding
         transfer_mismatch = False
 
     pools_match = audit.compare_pools(holdings)
+    queue_left = _review_queue_leftovers()
 
-    if not pools_match or transfer_mismatch:
+    if not pools_match or transfer_mismatch or queue_left:
         int_passed = False
 
     print(f"{Fore.CYAN}integrity check: {Fore.YELLOW}{'passed' if int_passed else 'failed'}")
+    if queue_left:
+        print(
+            f"{ERROR} Integrity check failed: {len(queue_left)} review-queue "
+            "withdrawal(s) are unresolved. Classify them, or list each one in "
+            "--review-exceptions with a reason."
+        )
+        for item in queue_left[:20]:
+            print(
+                f"{Fore.RED}  {item.timestamp} {item.quantity} {item.asset} "
+                f"'{item.wallet}' {item.tx_hash}"
+            )
+        if len(queue_left) > 20:
+            print(f"{Fore.RED}  ... and {len(queue_left) - 20} more")
 
     if transfer_mismatch:
         print(
@@ -368,6 +455,23 @@ def _do_integrity_check(audit: AuditRecords, holdings: Dict[AssetSymbol, Holding
             print(f"{ERROR} Integrity check failed: audit does not match section 104 pools")
         audit.report_failures()
     return int_passed
+
+
+def _review_queue_leftovers() -> List[QueueItem]:
+    exceptions = config.config.get("review_exception_rows", [])
+    return review_queue_failures(TransactionRow.review_queue, exceptions)
+
+
+def _write_year_end_snapshot(path: str, tax: TaxCalculator) -> None:
+    payload = tax.snapshot_payload(str(config.review_rows))
+    json_path = write_snapshot(path, payload)
+    print(f"{Fore.WHITE}section 104 snapshot: {Fore.YELLOW}{os.path.abspath(json_path)}")
+    flags = payload.get("timezone_flags", [])
+    if isinstance(flags, list) and flags:
+        print(
+            f"{WARNING} {len(flags)} transaction(s) fall in a different tax year in "
+            "UTC than in Europe/London. See the timezone flags file."
+        )
 
 
 def _transfer_mismatches(holdings: Dict[AssetSymbol, Holdings]) -> bool:
