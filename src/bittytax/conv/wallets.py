@@ -191,11 +191,16 @@ class LeaveUnmatched:
 
 @dataclass
 class ForcePair:
-    """An explicit pair. kind is transfer or exchange."""
+    """An explicit pair. kind is transfer or exchange.
+
+    out_asset and in_asset limit a hash that also carries a fee or another leg.
+    """
 
     out_hash: str
     in_hash: str
     kind: str
+    out_asset: str = ""
+    in_asset: str = ""
 
 
 @dataclass
@@ -867,7 +872,7 @@ def _load_force_pairs(value: object) -> List[ForcePair]:
     for index, raw in enumerate(value, start=1):
         where = f"match_overrides.force_pair[{index}]"
         item = _require_mapping(raw, where)
-        unknown = set(item) - {"out", "in", "type"}
+        unknown = set(item) - {"out", "in", "type", "out_asset", "in_asset"}
         if unknown:
             names = ", ".join(sorted(str(key) for key in unknown))
             raise WalletRegistryError(f"{where} has unknown keys: {names}")
@@ -878,7 +883,15 @@ def _load_force_pairs(value: object) -> List[ForcePair]:
             raise WalletRegistryError(f"{where} needs out and in")
         if kind not in ("transfer", "exchange"):
             raise WalletRegistryError(f"{where}.type must be transfer or exchange")
-        rules.append(ForcePair(out_hash=out_hash, in_hash=in_hash, kind=kind))
+        rules.append(
+            ForcePair(
+                out_hash=out_hash,
+                in_hash=in_hash,
+                kind=kind,
+                out_asset=_optional_str(item, "out_asset", where).upper(),
+                in_asset=_optional_str(item, "in_asset", where).upper(),
+            )
+        )
     return rules
 
 

@@ -63,8 +63,8 @@ def _force_pairs(
     announce: bool,
 ) -> None:
     for rule in registry.match_overrides.force_pair:
-        outs = _hash_legs(legs, rule.out_hash, "out")
-        incoming = _hash_legs(legs, rule.in_hash, "in")
+        outs = _hash_legs(legs, rule.out_hash, "out", rule.out_asset)
+        incoming = _hash_legs(legs, rule.in_hash, "in", rule.in_asset)
         if len(outs) == 1 and len(incoming) == 1:
             _apply_force(outs[0], incoming[0], rule, registry, result)
             continue
@@ -113,16 +113,20 @@ def _apply_force(
     result.pinned.add(id(incoming.row))
 
 
-def _hash_legs(legs: Sequence[TransferLeg], tx_hash: str, direction: str) -> List[TransferLeg]:
+def _hash_legs(
+    legs: Sequence[TransferLeg], tx_hash: str, direction: str, asset: str = ""
+) -> List[TransferLeg]:
     digest = normalise_tx_hash(tx_hash)
     if not digest:
         return []
-    return [
-        leg
-        for leg in legs
-        if leg.direction == direction
-        and leg.eligible
-        and not leg.consumed
-        and not leg.held
-        and normalise_tx_hash(_tx_hash(leg.row)) == digest
-    ]
+    wanted = asset.strip().upper()
+    found: List[TransferLeg] = []
+    for leg in legs:
+        if leg.direction != direction or not leg.eligible or leg.consumed or leg.held:
+            continue
+        if normalise_tx_hash(_tx_hash(leg.row)) != digest:
+            continue
+        if wanted and _asset(leg.row, direction).strip().upper() != wanted:
+            continue
+        found.append(leg)
+    return found

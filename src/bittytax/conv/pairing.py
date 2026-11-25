@@ -927,7 +927,7 @@ def _bridge_evidence(row: DataRow, registry: WalletRegistry) -> bool:
     text = _text(row)
     if any(pattern and pattern in text for pattern in registry.bridges.patterns):
         return True
-    if registry.bridges.matches_route(text):
+    if registry.bridges.matches_route(_route_text(row)):
         return True
     return (
         _rule_on(row, registry, "bridge", "out") is not None
@@ -1260,6 +1260,16 @@ def _stamp(row: DataRow) -> datetime:
     if timestamp.tzinfo is None:
         return timestamp.replace(tzinfo=TZ_UTC)
     return timestamp.astimezone(TZ_UTC)
+
+
+def _route_text(row: DataRow) -> str:
+    """Description, tag and note, plus the destination and contract."""
+    parts = [_text(row)]
+    parts.extend(_dest_candidates(row))
+    for key in _CONTRACT_KEYS:
+        if key in row.row_dict and row.row_dict[key].strip():
+            parts.append(row.row_dict[key].strip())
+    return " ".join(parts).casefold()
 
 
 def _text(row: DataRow) -> str:

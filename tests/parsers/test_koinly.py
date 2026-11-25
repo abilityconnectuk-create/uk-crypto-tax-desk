@@ -379,3 +379,110 @@ def test_value_falls_back_to_net_worth() -> None:
     )
     assert data_row.t_record is not None
     assert data_row.t_record.buy_value == Decimal("200")
+
+
+def test_futures_and_funding_tags_are_margin() -> None:
+    paid = _parse_tax_report(
+        **{
+            "Date": "2024-06-01 12:00:00",
+            "Type": "crypto_withdrawal",
+            "Tag": "Futures fee",
+            "Sending Wallet": "Futures",
+            "Sent Amount": "2",
+            "Sent Currency": "USDT",
+            "Net Value (GBP)": "2",
+            "TxHash": "0x" + "ab" * 16,
+        }
+    )
+    assert paid.t_record is not None
+    assert paid.t_record.t_type is TrType.MARGIN_FEE
+
+    funding = _parse_tax_report(
+        **{
+            "Date": "2024-06-01 13:00:00",
+            "Type": "crypto_withdrawal",
+            "Tag": "funding_fee",
+            "Sending Wallet": "Futures",
+            "Sent Amount": "0.4",
+            "Sent Currency": "USDT",
+            "Net Value (GBP)": "0.4",
+            "TxHash": "0x" + "ac" * 16,
+        }
+    )
+    assert funding.t_record is not None
+    assert funding.t_record.t_type is TrType.MARGIN_FEE
+
+    received = _parse_tax_report(
+        **{
+            "Date": "2024-06-01 14:00:00",
+            "Type": "crypto_deposit",
+            "Tag": "Funding fee",
+            "Receiving Wallet": "Futures",
+            "Received Amount": "1.5",
+            "Received Currency": "USDT",
+            "Net Value (GBP)": "1.5",
+            "TxHash": "0x" + "ad" * 16,
+        }
+    )
+    assert received.t_record is not None
+    assert received.t_record.t_type is TrType.MARGIN_FEE_REBATE
+
+    gain = _parse_tax_report(
+        **{
+            "Date": "2024-06-02 10:00:00",
+            "Type": "crypto_deposit",
+            "Tag": "Realized gain",
+            "Receiving Wallet": "Futures",
+            "Received Amount": "25",
+            "Received Currency": "USDT",
+            "Net Value (GBP)": "20",
+            "TxHash": "0x" + "ae" * 16,
+        }
+    )
+    assert gain.t_record is not None
+    assert gain.t_record.t_type is TrType.MARGIN_GAIN
+
+    loss = _parse_tax_report(
+        **{
+            "Date": "2024-06-02 11:00:00",
+            "Type": "crypto_withdrawal",
+            "Tag": "Realized loss",
+            "Sending Wallet": "Futures",
+            "Sent Amount": "8",
+            "Sent Currency": "USDT",
+            "Net Value (GBP)": "6",
+            "TxHash": "0x" + "af" * 16,
+        }
+    )
+    assert loss.t_record is not None
+    assert loss.t_record.t_type is TrType.MARGIN_LOSS
+
+    sent_gain = _parse_tax_report(
+        **{
+            "Date": "2024-06-02 12:00:00",
+            "Type": "crypto_withdrawal",
+            "Tag": "realized_gain",
+            "Sending Wallet": "Futures",
+            "Sent Amount": "4",
+            "Sent Currency": "USDT",
+            "Net Value (GBP)": "3",
+            "TxHash": "0x" + "ba" * 16,
+        }
+    )
+    assert sent_gain.t_record is not None
+    assert sent_gain.t_record.t_type is TrType.MARGIN_LOSS
+
+    bulk = _parse(
+        **{
+            "Date (UTC)": "2024-06-03 09:00:00",
+            "Type": "withdrawal",
+            "Tag": "futures fee",
+            "From Amount": "3",
+            "From Currency": "USDT",
+            "From Wallet (read-only)": "Futures",
+            "Net Value (read-only)": "3",
+            "Value Currency (read-only)": "GBP",
+        }
+    )
+    assert bulk.t_record is not None
+    assert bulk.t_record.t_type is TrType.MARGIN_FEE

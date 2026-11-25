@@ -646,6 +646,8 @@ def test_example_registry_loads() -> None:
     assert registry.match_overrides.leave_unmatched[0].tx_hash.endswith("1111")
     assert registry.match_overrides.leave_unmatched[1].asset == "USDT"
     assert registry.match_overrides.force_pair[0].kind == "transfer"
+    assert registry.match_overrides.force_pair[0].out_asset == "USDC"
+    assert registry.match_overrides.force_pair[0].in_asset == "WIDGET"
     assert registry.official_contracts[0].asset == "USDT"
     assert registry.official_contracts[0].names == ("Tether USD",)
     assert registry.poison_addresses[0].address.endswith("0b0b")

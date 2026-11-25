@@ -17,8 +17,8 @@ from .pairing import (  # pylint: disable=cyclic-import
     _leg_value,
     _merge_exchange,
     _record,
+    _route_text,
     _selectable,
-    _text,
     _tx_hash,
     _wallets_differ,
     amounts_match,
@@ -117,7 +117,7 @@ def _token_change(out: TransferLeg, incoming: TransferLeg, registry: WalletRegis
     """
     if _collectible_leg(incoming):
         return False
-    if registry.bridges.blocks_token_change(_text(out.row)):
+    if registry.bridges.blocks_token_change(_route_text(out.row)):
         return False
     return _values_close(out, incoming, registry)
 

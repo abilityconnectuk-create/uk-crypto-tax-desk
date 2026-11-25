@@ -19,6 +19,8 @@ The new `price_via_btc` config option may not exist in your config file. If it i
 - Conversion tool: `match.same_wallet_swaps` (default off) pairs same-hash, different-asset legs on one wallet with a blank destination into one logged trade. LP and receipt tokens stay on the review queue.
 
 ### Fixed
+- Conversion tool: Koinly tags `Futures fee` and `Funding fee` are margin fees (a received fee is a margin-fee rebate). `Realized loss` on a withdrawal is a margin loss, as `Realized gain` already is.
+- Conversion tool: `force_pair` accepts optional `out_asset` and `in_asset`, so a hash that also has a fee leg pairs only the named asset. A same-asset bridge route also matches the destination and the contract.
 - Conversion tool: a bridge from USDT to USDC is an exchange when both local values are known and within tolerance. The same asset is still preferred when that in-leg also fits. A token change no longer matches on quantity alone, so a receive with no value stays off the pair and the send remains a missing destination.
 - Conversion tool: a same-wallet swap no longer treats a dust receive, such as 0.0004 SUI against 3,424 USDT, as the acquired token. A tiny native-coin send is not a swap unless both local values are principal. A token name with a hash id stays on review.
 - Conversion tool: `receipt_tokens` is applied before collateral classification, so a same-hash receipt leg is an exchange. A deposit with no receipt leg still follows the collateral review.

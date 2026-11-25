@@ -749,3 +749,108 @@ def test_same_asset_only_route_leaves_a_missing_receive() -> None:
     assert plain.t_record is not None and plain.t_record.t_type is TrType.TRADE
     assert plain.t_record.buy_asset == "USDC"
     assert "bridge-exchange" in _actions(swapped)
+
+
+def test_force_pair_can_name_the_asset_beside_a_fee_leg() -> None:
+    tx_hash = "0x" + "81" * 32
+
+    def rows() -> tuple[DataRow, DataRow, DataRow]:
+        sent = _make(
+            TrType.GIFT_SENT, BASE, "USDC", "625", "Exchange", tx_hash=tx_hash, value="625"
+        )
+        fee = _make(
+            TrType.GIFT_SENT, BASE, "SOL", "0.003", "Exchange", tx_hash=tx_hash, value="0.4"
+        )
+        received = _make(
+            TrType.GIFT_RECEIVED, BASE, "SERSH", "1250", "Ledger", tx_hash=tx_hash, value="620"
+        )
+        return sent, fee, received
+
+    registry = _registry()
+    sent, fee, received = rows()
+    registry.match_overrides.force_pair = [ForcePair(tx_hash, tx_hash, "exchange")]
+    ambiguous = _run(sent, fee, received, registry=registry)
+    assert "override-ambiguous" in _actions(ambiguous)
+    assert sent.t_record is not None and sent.t_record.t_type is not TrType.TRADE
+    assert fee.t_record is not None and fee.t_record.t_type is not TrType.TRADE
+
+    sent, fee, received = rows()
+    registry.match_overrides.force_pair = [
+        ForcePair(tx_hash, tx_hash, "exchange", out_asset="USDC", in_asset="SERSH")
+    ]
+    named = _run(sent, fee, received, registry=registry)
+    assert sent.t_record is not None and sent.t_record.t_type is TrType.TRADE
+    assert sent.t_record.buy_asset == "SERSH"
+    assert received.t_record is None
+    assert fee.t_record is not None and fee.t_record.sell_asset == "SOL"
+    assert fee.t_record.t_type is not TrType.TRADE
+    assert "override-exchange" in _actions(named)
+
+
+def test_same_asset_only_matches_the_destination_and_the_contract() -> None:
+    route = "0x" + "cd" * 20
+    registry = _registry()
+    registry.bridges.routes.append(BridgeRoute("mayan", True, (route,)))
+    sent = _make(
+        TrType.GIFT_SENT,
+        BASE,
+        "USDT",
+        "1500",
+        "Exchange",
+        chain="ethereum",
+        value="1500",
+        destination=route,
+    )
+    received = _make(
+        TrType.GIFT_RECEIVED,
+        BASE + timedelta(hours=2),
+        "USDC",
+        "1490",
+        "Ledger",
+        chain="arbitrum",
+        value="1490",
+    )
+    missed = _run(sent, received, registry=registry)
+    assert sent.t_record is not None and sent.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert sent.t_record.t_type is not TrType.TRADE
+    assert missed.queue[0].disposition == "missing-destination"
+
+    by_contract = _make(
+        TrType.GIFT_SENT, BASE, "USDT", "1500", "Exchange", chain="ethereum", value="1500"
+    )
+    by_contract.row_dict["Contract"] = route
+    changed = _make(
+        TrType.GIFT_RECEIVED,
+        BASE + timedelta(hours=2),
+        "USDC",
+        "1490",
+        "Ledger",
+        chain="arbitrum",
+        value="1490",
+    )
+    held = _run(by_contract, changed, registry=registry)
+    assert by_contract.t_record is not None and by_contract.t_record.t_type == NEEDS_REVIEW_TYPE
+    assert held.queue[0].disposition == "missing-destination"
+
+    same = _make(
+        TrType.GIFT_SENT,
+        BASE,
+        "USDT",
+        "1500",
+        "Exchange",
+        chain="ethereum",
+        value="1500",
+        destination=route,
+    )
+    same_in = _make(
+        TrType.GIFT_RECEIVED,
+        BASE + timedelta(hours=1),
+        "USDT",
+        "1490",
+        "Ledger",
+        chain="arbitrum",
+        value="1490",
+    )
+    _run(same, same_in, registry=registry)
+    assert same.t_record is not None and same.t_record.t_type is TrType.WITHDRAWAL
+    assert same_in.t_record is not None and same_in.t_record.t_type is TrType.DEPOSIT
