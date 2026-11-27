@@ -1,0 +1,11 @@
+# Invented register for the desk's review sample. No real addresses.
+spam:
+  symbols:
+    - SCAM
+match:
+  window_hours: 24
+  amount_tolerance: "0.02"
+match_overrides:
+  leave_unmatched:
+    - tx_hash: "sample-leave-unmatched"
+      asset: BTC

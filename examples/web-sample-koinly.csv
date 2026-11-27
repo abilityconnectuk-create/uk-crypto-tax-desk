@@ -1,0 +1,7 @@
+Date,Type,Tag,Sending Wallet,Sent Amount,Sent Currency,Sent Cost Basis,Receiving Wallet,Received Amount,Received Currency,Received Cost Basis,Fee Amount,Fee Currency,Gain (GBP),Net Value (GBP),Fee Value (GBP),TxSrc,TxDest,TxHash,Description
+2024-05-01 12:00:00,exchange,,Example Exchange,20000,GBP,,Example Exchange,1,BTC,,,,,20000,,,,sample-tx-btc-buy,Bought one BTC
+2024-10-01 12:00:00,exchange,,Example Exchange,0.25,BTC,,Example Exchange,8000,GBP,,,,,8000,,,,sample-tx-btc-sell-oct,Sold BTC before the split
+2024-11-15 12:00:00,exchange,,Example Exchange,0.25,BTC,,Example Exchange,9000,GBP,,,,,9000,,,,sample-tx-btc-sell-nov,Sold BTC after the split
+2025-08-01 12:00:00,exchange,,Example Exchange,0.25,BTC,,Example Exchange,10000,GBP,,,,,10000,,,,sample-tx-btc-sell-aug,Sold BTC in 2025/26
+2025-09-01 12:00:00,crypto_deposit,reward,,,,,Example Exchange,1,ETH,,,,,2000,,,,sample-tx-eth-reward,Staking reward
+2025-09-15 12:00:00,crypto_deposit,,,,,,Example Exchange,0.1,ETH,,,,,200,,,,sample-tx-eth-gift,sample gift to reclassify

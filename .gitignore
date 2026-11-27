@@ -107,3 +107,10 @@ venv.bak/
 .mypy_cache/
 
 .idea/
+
+# Local desk data and wallet registers. Do not commit real records or addresses.
+.uk-crypto-tax-desk/
+**/.uk-crypto-tax-desk/
+wallets.yaml
+desk-password.json
+desk-session.key

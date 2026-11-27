@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+{% block body %}
+    <h1>Report</h1>
+    <p class="lede">Figures are produced by the BittyTax calculator for a UK individual. This page does not apply a tax rule of its own. The default year is 2025/26. 2024/25 still uses the calculator's 30 October 2024 split.</p>
+    <form method="get" action="/report">
+        <input type="hidden" name="run" value="1">
+        <label for="tax_year">Tax year</label>
+        <select id="tax_year" name="tax_year">
+            {% for item in years %}
+                <option value="{{ item.year }}"
+                        {% if item.year == tax_year %}selected{% endif %}>{{ item.label }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit">Run report</button>
+    </form>
+    {% if error %}
+        <p class="warn">{{ error }}</p>
+    {% endif %}
+    {% if report %}
+        <p>Period {{ report.start }} to {{ report.end }} ({{ report.timezone }}). Currency {{ report.currency }}.</p>
+        {% if report.integrity_ok %}
+            <p class="note">Integrity check passed.</p>
+        {% else %}
+            <p class="warn">Integrity check failed. The calculator would stop before printing a report until the review queue is clear. The figures below are still the calculator's figures for these records.</p>
+        {% endif %}
+        <h2>Capital gains</h2>
+        <table>
+            <tbody>
+                <tr>
+                    <th>Number of disposals</th>
+                    <td>{{ report.summary.disposals }}</td>
+                </tr>
+                <tr>
+                    <th>Disposal proceeds</th>
+                    <td>{{ report.summary.proceeds | gbp }}</td>
+                </tr>
+                <tr>
+                    <th>Allowable costs (including the purchase price)</th>
+                    <td>{{ report.summary.allowable_costs | gbp }}</td>
+                </tr>
+                <tr>
+                    <th>Gains in the year, before losses</th>
+                    <td>{{ report.summary.total_gain | gbp }}</td>
+                </tr>
+                <tr>
+                    <th>Losses in the year</th>
+                    <td>{{ report.summary.losses | gbp }}</td>
+                </tr>
+                <tr>
+                    <th>Gain</th>
+                    <td>{{ report.summary.gain | gbp }}</td>
+                </tr>
+                {% if report.summary.split_date %}
+                    <tr>
+                        <th>Gains before {{ report.summary.split_date_label }}</th>
+                        <td>{{ report.summary.gain_before | gbp }}</td>
+                    </tr>
+                    <tr>
+                        <th>Gains on or after {{ report.summary.split_date_label }}</th>
+                        <td>{{ report.summary.gain_after | gbp }}</td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+        {% if report.summary.proceeds_warning %}
+            <p class="warn">Disposal proceeds are at or above the calculator's proceeds limit ({{ report.summary.proceeds_limit | gbp }}).</p>
+        {% endif %}
+        <h2>Tax estimate</h2>
+        <p>The figures below are only an estimate. They do not take into consideration other gains and losses in the same tax year. Always consult a professional accountant before filing.</p>
+        {% if report.summary.split_date %}
+            <h3>Gains before {{ report.summary.split_date_label }}</h3>
+        {% endif %}
+        <table>
+            <tbody>
+                <tr>
+                    <th>Taxable gain</th>
+                    <td>{{ report.estimate.before.taxable_gain | gbp }}</td>
+                </tr>
+                <tr>
+                    <th>Capital gains tax, basic rate ({{ report.estimate.before.basic_rate }})</th>
+                    <td>{{ report.estimate.before.cgt_basic | gbp }}</td>
+                </tr>
+                <tr>
+                    <th>Capital gains tax, higher rate ({{ report.estimate.before.higher_rate }})</th>
+                    <td>{{ report.estimate.before.cgt_higher | gbp }}</td>
+                </tr>
+                <tr>
+                    <th>Annual exempt amount</th>
+                    <td>{{ report.estimate.before.allowance | gbp }}</td>
+                </tr>
+            </tbody>
+        </table>
+        {% if report.estimate.after %}
+            <h3>Gains on or after {{ report.summary.split_date_label }}</h3>
+            <table>
+                <tbody>
+                    <tr>
+                        <th>Taxable gain</th>
+                        <td>{{ report.estimate.after.taxable_gain | gbp }}</td>
+                    </tr>
+                    <tr>
+                        <th>Capital gains tax, basic rate ({{ report.estimate.after.basic_rate }})</th>
+                        <td>{{ report.estimate.after.cgt_basic | gbp }}</td>
+                    </tr>
+                    <tr>
+                        <th>Capital gains tax, higher rate ({{ report.estimate.after.higher_rate }})</th>
+                        <td>{{ report.estimate.after.cgt_higher | gbp }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        {% endif %}
+        <h2>Income</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Type</th>
+                    <th>Market value</th>
+                    <th>Fees</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in report.income.types %}
+                    <tr>
+                        <td>{{ row.type }}</td>
+                        <td>{{ row.amount | gbp }}</td>
+                        <td>{{ row.fees | gbp }}</td>
+                    </tr>
+                {% else %}
+                    <tr>
+                        <td colspan="3">No income in this year.</td>
+                    </tr>
+                {% endfor %}
+                <tr>
+                    <th>Total</th>
+                    <td>{{ report.income.amount | gbp }}</td>
+                    <td>{{ report.income.fees | gbp }}</td>
+                </tr>
+            </tbody>
+        </table>
+        <h2>Section 104 pools</h2>
+        <h3>At the start {% if report.pools.start_as_of %}({{ report.pools.start_as_of }}){% endif %}</h3>
+        {% if report.pools.start %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Asset</th>
+                        <th>Quantity</th>
+                        <th>Cost</th>
+                        <th>Fees</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in report.pools.start %}
+                        <tr>
+                            <td>{{ row.asset }}</td>
+                            <td>{{ row.quantity }}</td>
+                            <td>{{ row.cost | gbp }}</td>
+                            <td>{{ row.fees | gbp }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p>No pooled balance at the start of the year.</p>
+        {% endif %}
+        <h3>At the end {% if report.pools.end_as_of %}({{ report.pools.end_as_of }}){% endif %}</h3>
+        {% if report.pools.end %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Asset</th>
+                        <th>Quantity</th>
+                        <th>Cost</th>
+                        <th>Fees</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in report.pools.end %}
+                        <tr>
+                            <td>{{ row.asset }}</td>
+                            <td>{{ row.quantity }}</td>
+                            <td>{{ row.cost | gbp }}</td>
+                            <td>{{ row.fees | gbp }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p>No pooled balance at the end of the year.</p>
+        {% endif %}
+        <h2>Disposals</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Asset</th>
+                    <th>Date</th>
+                    <th>Disposal type</th>
+                    <th>Quantity</th>
+                    <th>Cost</th>
+                    <th>Fees</th>
+                    <th>Proceeds</th>
+                    <th>Gain</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in report.disposals %}
+                    <tr>
+                        <td>{{ row.asset }}</td>
+                        <td>{{ row.date }}</td>
+                        <td>{{ row.disposal_type }}</td>
+                        <td>{{ row.quantity }}</td>
+                        <td>{{ row.cost | gbp }}</td>
+                        <td>{{ row.fees | gbp }}</td>
+                        <td>{{ row.proceeds | gbp }}</td>
+                        <td>{{ row.gain | gbp }}</td>
+                    </tr>
+                {% else %}
+                    <tr>
+                        <td colspan="8">No disposals in this year.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <p><a href="/report.csv?tax_year={{ report.tax_year }}">Download CSV</a></p>
+        <p>The same records, for the command-line calculator: <code>{{ records_path }}</code></p>
+        {% if report.messages %}
+            <details>
+                <summary>Calculator messages</summary>
+                <pre>{{ report.messages }}</pre>
+            </details>
+        {% endif %}
+    {% endif %}
+{% endblock %}

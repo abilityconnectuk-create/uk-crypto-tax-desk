@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block body %}
+    <h1>Reclassify</h1>
+    {% if saved %}
+        <p class="note">The change was appended to the log. The uploaded file was not edited.</p>
+    {% endif %}
+    {% if error %}
+        <p class="warn">{{ error }}</p>
+    {% endif %}
+    <table>
+        <tbody>
+            <tr>
+                <th>Date</th>
+                <td>{{ row.timestamp }}</td>
+            </tr>
+            <tr>
+                <th>Type</th>
+                <td>{{ row.type }}</td>
+            </tr>
+            <tr><th>In</th><td>{{ row.buy_quantity }} {{ row.buy_asset }} {% if row.buy_value %}({{ row.buy_value | gbp }}){% endif %}</td></tr>
+            <tr><th>Out</th><td>{{ row.sell_quantity }} {{ row.sell_asset }} {% if row.sell_value %}({{ row.sell_value | gbp }}){% endif %}</td></tr>
+            <tr>
+                <th>Wallet</th>
+                <td>{{ row.wallet }}</td>
+            </tr>
+            <tr>
+                <th>Note</th>
+                <td>{{ row.note }}</td>
+            </tr>
+            <tr>
+                <th>Status</th>
+                <td>{{ row.status }}</td>
+            </tr>
+        </tbody>
+    </table>
+    <form class="stack"
+          method="post"
+          action="/transactions/{{ row.import_id }}/{{ row.id.split(':')[1] }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label for="type">New type</label>
+        <select id="type" name="type" required>
+            {% for kind in row.allowed_types %}
+                <option value="{{ kind }}" {% if kind == row.type %}selected{% endif %}>{{ kind }}</option>
+            {% endfor %}
+        </select>
+        <label for="why">Why</label>
+        <textarea id="why" name="why" required rows="3"></textarea>
+        <button type="submit">Save reclassification</button>
+    </form>
+    <h2>Change log</h2>
+    {% if row.log %}
+        <table>
+            <thead>
+                <tr>
+                    <th>When</th>
+                    <th>Who</th>
+                    <th>From</th>
+                    <th>To</th>
+                    <th>Why</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in row.log %}
+                    <tr>
+                        <td>{{ entry.at }}</td>
+                        <td>{{ entry.who }}</td>
+                        <td>{{ entry.before_type }}</td>
+                        <td>{{ entry.after_type }}</td>
+                        <td>{{ entry.why }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>No changes yet. Each save is appended. Earlier lines are kept.</p>
+    {% endif %}
+{% endblock %}

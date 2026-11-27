@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>{{ title }} · BittyTax desk</title>
+        <meta name="csrf-token" content="{{ csrf }}">
+        <link rel="stylesheet" href="/static/style.css">
+    </head>
+    <body>
+        <header class="top">
+            <p class="brand"><a href="/">BittyTax desk</a></p>
+            <nav>
+                <a href="/" {% if section == "home" %}aria-current="page"{% endif %}>Desk</a>
+                <a href="/import"
+                   {% if section == "import" %}aria-current="page"{% endif %}>Import</a>
+                <a href="/transactions"
+                   {% if section == "transactions" %}aria-current="page"{% endif %}>Transactions</a>
+                <a href="/review"
+                   {% if section == "review" %}aria-current="page"{% endif %}>Review</a>
+                <a href="/report"
+                   {% if section == "report" %}aria-current="page"{% endif %}>Report</a>
+                <a href="/config"
+                   {% if section == "config" %}aria-current="page"{% endif %}>Config</a>
+                <a href="/about"
+                   {% if section == "about" %}aria-current="page"{% endif %}>About</a>
+            </nav>
+            {% if signed_in %}
+                <p class="who">{{ actor }}</p>
+                <form class="signout" method="post" action="/logout">
+                    <input type="hidden" name="csrf" value="{{ csrf }}">
+                    <button type="submit">Sign out</button>
+                </form>
+            {% endif %}
+        </header>
+        <main>
+            {% block body %}{% endblock %}
+        </main>
+        <footer>
+            <p>BittyTax is copyright Nano Nano Ltd and licensed under the GNU Affero General Public License, version 3 (AGPL-3.0). This desk is a local fork of that program. The licence is unchanged.</p>
+            <p>Nano Nano Ltd does not provide tax, legal, accounting or financial advice. Figures here are the calculator's output for information only. They are not tax advice. Obtain advice from a professional accountant before you file.</p>
+        </footer>
+    </body>
+</html>

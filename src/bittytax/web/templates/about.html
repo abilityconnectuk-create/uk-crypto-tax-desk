@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block body %}
+    <h1>About</h1>
+    <p class="lede">This is a local desk for BittyTax. It listens on this computer and reads a data directory there. Another device reaches it only through Tailscale on your private tailnet.</p>
+    <h2>Licence</h2>
+    <p>BittyTax is copyright Nano Nano Ltd and is free software under the GNU Affero General Public License, version 3. See the LICENSE file in this repository. This desk is part of that work. Keep the licence and the existing copyright notices if you share a copy.</p>
+    <h2>Not tax advice</h2>
+    <p>Nano Nano Ltd does not provide tax, legal, accounting or financial advice. This software and its content are provided for information only, and should not be relied upon for tax, legal, accounting or financial advice.</p>
+    <p>You should obtain specific professional advice from a professional accountant, or a tax or legal adviser, before you take any action.</p>
+    <p>The software is provided as is. Nano Nano Ltd does not give any warranty, express or implied, as to its suitability or usability.</p>
+    <h2>What the desk does not do</h2>
+    <p>It does not contact a price service. A row needs a value in the local currency, the value the conversion tool kept from the export. It does not edit the calculator's tax rules. If a figure looks surprising, the command-line report on the derived records file is the same calculation.</p>
+    <p>A browser on this computer, at 127.0.0.1, does not ask for a password. A browser that arrives through Tailscale Serve does. Do not publish the desk on the public internet, and do not turn on Tailscale Funnel.</p>
+{% endblock %}
