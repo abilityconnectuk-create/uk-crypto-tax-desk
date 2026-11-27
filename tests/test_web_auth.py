@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
 import threading
 import urllib.request
@@ -151,7 +152,7 @@ def test_set_password_stores_a_hash_outside_the_repo(
     stored = path.read_text(encoding="utf-8")
     assert "correct-horse" not in stored
     assert json.loads(stored)["user"] == "mark"
-    assert path.stat().st_mode & 0o777 == 0o600
+    _assert_owner_only(path)
     auth = DeskAuth(tmp_path)
     assert auth.check_password("correct-horse")
     assert auth.check_password("wrong-horse") is False
@@ -273,8 +274,7 @@ def test_this_computer_stays_open_and_post_needs_a_token(tmp_path: Path) -> None
         assert "Local tax desk" in body
         assert "Secure" not in client.set_cookie
         key = tmp_path / "desk-session.key"
-        assert key.is_file()
-        assert key.stat().st_mode & 0o777 == 0o600
+        _assert_owner_only(key)
         request_status, request_body = _post_without_token(client, "/import")
         assert request_status == 403
         assert "form token" in request_body
@@ -366,6 +366,14 @@ def test_sign_in_is_rate_limited(tmp_path: Path) -> None:
         status, body, _ = client.post_form("/login", {"password": "correct-horse"})
         assert status == 429
         assert "Too many" in body
+
+
+def _assert_owner_only(path: Path) -> None:
+    """Require mode 0600 where the system records a file mode."""
+    assert path.is_file()
+    if os.name != "posix":
+        return
+    assert path.stat().st_mode & 0o777 == 0o600
 
 
 def _post_without_token(client: _Client, path: str) -> Tuple[int, str]:
