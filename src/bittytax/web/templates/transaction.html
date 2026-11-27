@@ -36,6 +36,7 @@
     <form class="stack"
           method="post"
           action="/transactions/{{ row.import_id }}/{{ row.id.split(':')[1] }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
         <label for="type">New type</label>
         <select id="type" name="type" required>
             {% for kind in row.allowed_types %}

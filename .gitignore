@@ -112,3 +112,5 @@ venv.bak/
 .uk-crypto-tax-desk/
 **/.uk-crypto-tax-desk/
 wallets.yaml
+desk-password.json
+desk-session.key

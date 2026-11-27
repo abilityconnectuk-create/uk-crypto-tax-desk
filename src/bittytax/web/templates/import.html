@@ -9,6 +9,7 @@
         <p class="warn">{{ error }}</p>
     {% endif %}
     <form method="post" action="/import" enctype="multipart/form-data">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
         <label for="file">Koinly CSV, or another supported export</label>
         <input id="file" name="file" type="file" required>
         <button type="submit">Import</button>

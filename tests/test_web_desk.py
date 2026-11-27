@@ -195,29 +195,27 @@ def test_server_imports_reclassifies_and_reports(tmp_path: Path) -> None:
     address = httpd.server_address
     host, port = str(address[0]), int(address[1])
     assert host == "127.0.0.1"
-    base = f"http://127.0.0.1:{port}"
+    browser = _Browser(f"http://127.0.0.1:{port}")
     try:
-        about = _get(base + "/about")
+        about = browser.get("/about")
         assert "AGPL-3.0" in about
         assert "not tax advice" in about.casefold()
-        imported = _post_file(base + "/import", SAMPLE.name, SAMPLE.read_bytes())
+        imported = browser.post_file("/import", SAMPLE.name, SAMPLE.read_bytes())
         assert "Imported" in imported
-        listing = _get(base + "/transactions?query=" + quote(GIFT_NOTE))
+        listing = browser.get("/transactions?query=" + quote(GIFT_NOTE))
         assert GIFT_NOTE in listing
         match = re.search(r'href="(/transactions/[^"]+)"', listing)
         assert match is not None
-        page = _post(
-            base + match.group(1),
-            urlencode({"type": "Income", "why": "Sample gift is income."}).encode("utf-8"),
-            "application/x-www-form-urlencoded",
+        page = browser.post_form(
+            match.group(1), {"type": "Income", "why": "Sample gift is income."}
         )
         assert "Income" in page
         assert "Sample gift is income." in page
-        report = _get(base + "/report?tax_year=2026&run=1")
+        report = browser.get("/report?tax_year=2026&run=1")
         assert "Disposal proceeds" in report
-        downloaded = _get(base + "/report.csv?tax_year=2026")
+        downloaded = browser.get("/report.csv?tax_year=2026")
         assert "disposal_proceeds" in downloaded
-        style = _get(base + "/static/style.css")
+        style = browser.get("/static/style.css")
         assert "--ink" in style
     finally:
         httpd.shutdown()
@@ -347,31 +345,72 @@ def _income_total(section: str) -> Decimal:
     return Decimal(amounts[-1].replace(",", ""))
 
 
-def _get(url: str) -> str:
-    with urlopen(url, timeout=60) as response:
-        return response.read().decode("utf-8")
+_CSRF_META = re.compile(r'name="csrf-token" content="([^"]*)"')
 
 
-def _post(url: str, body: bytes, content_type: str) -> str:
-    request = Request(url, data=body, method="POST")
-    request.add_header("Content-Type", content_type)
-    try:
-        with urlopen(request, timeout=60) as response:
-            return response.read().decode("utf-8")
-    except HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise AssertionError(f"{exc.code} {detail}") from exc
+class _Browser:
+    """Sends the session cookie and form token the desk now requires."""
 
+    def __init__(self, base: str) -> None:
+        self.base = base
+        self.cookie = ""
+        self.csrf = ""
 
-def _post_file(url: str, filename: str, data: bytes) -> str:
-    boundary = "----deskboundary7MA4YWxkTrZu0gW"
-    body = (
-        (
-            f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
-            "Content-Type: text/csv\r\n\r\n"
-        ).encode("utf-8")
-        + data
-        + f"\r\n--{boundary}--\r\n".encode("utf-8")
-    )
-    return _post(url, body, f"multipart/form-data; boundary={boundary}")
+    def get(self, path: str) -> str:
+        return self._open(Request(self.base + path))
+
+    def post_form(self, path: str, fields: Mapping[str, str]) -> str:
+        payload = dict(fields)
+        if self.csrf:
+            payload["csrf"] = self.csrf
+        body = urlencode(payload).encode("utf-8")
+        request = Request(self.base + path, data=body, method="POST")
+        request.add_header("Content-Type", "application/x-www-form-urlencoded")
+        return self._open(request)
+
+    def post_file(self, path: str, filename: str, data: bytes) -> str:
+        boundary = "----deskboundary7MA4YWxkTrZu0gW"
+        csrf = (
+            (
+                f"--{boundary}\r\n"
+                'Content-Disposition: form-data; name="csrf"\r\n\r\n'
+                f"{self.csrf}\r\n"
+            ).encode("utf-8")
+            if self.csrf
+            else b""
+        )
+        body = (
+            csrf
+            + (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+                "Content-Type: text/csv\r\n\r\n"
+            ).encode("utf-8")
+            + data
+            + f"\r\n--{boundary}--\r\n".encode("utf-8")
+        )
+        request = Request(self.base + path, data=body, method="POST")
+        request.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+        return self._open(request)
+
+    def _open(self, request: Request) -> str:
+        if self.cookie:
+            request.add_header("Cookie", self.cookie)
+        try:
+            with urlopen(request, timeout=60) as response:
+                self._take(response.headers)
+                body = response.read().decode("utf-8")
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise AssertionError(f"{exc.code} {detail}") from exc
+        found = _CSRF_META.search(body)
+        if found:
+            self.csrf = found.group(1)
+        return body
+
+    def _take(self, headers: object) -> None:
+        getter = getattr(headers, "get", None)
+        raw = getter("Set-Cookie") if callable(getter) else None
+        if not raw:
+            return
+        self.cookie = str(raw).split(";", 1)[0].strip()

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # Fork of BittyTax (AGPL-3.0). See LICENSE.
-"""HTTP server for this computer only. There is no login; see identity.actor_for."""
+"""HTTP server for the desk. This computer is open. Any other host must sign in."""
 
 from __future__ import annotations
 
@@ -18,10 +18,21 @@ import jinja2
 
 from ..report import ReportLog
 from . import DEFAULT_TAX_YEAR
+from .auth import (
+    DeskAuth,
+    Session,
+    canonical_bind_host,
+    cookie_is_secure,
+    host_allowed,
+    hostname_of,
+    is_direct_loopback,
+    is_tailscale_ip,
+    safe_next,
+)
 from .config_view import config_snapshot
 from .engine_run import supported_years
 from .errors import DeskError
-from .identity import actor_for
+from .identity import LOOPBACK, actor_for, trusted_tailscale_user
 from .store import Desk
 
 _STATIC = Path(__file__).resolve().parent / "static"
@@ -47,25 +58,42 @@ _ENV.filters["gbp"] = _gbp
 _MAX_BODY = 64 * 1024 * 1024
 
 
-def serve(root: Path, port: int) -> None:
-    """Serve ``root`` on 127.0.0.1 until the process is stopped."""
-    httpd = bind_server(root, port)
+def serve(root: Path, port: int, host: str = "127.0.0.1") -> None:
+    """Serve ``root`` until the process is stopped."""
+    httpd = bind_server(root, port, host)
     try:
         httpd.serve_forever()
     finally:
         httpd.server_close()
 
 
-def bind_server(root: Path, port: int) -> ThreadingHTTPServer:
+def bind_server(root: Path, port: int, host: str = "127.0.0.1") -> ThreadingHTTPServer:
+    """Bind the desk. The host must be this computer, or a Tailscale address."""
+    bind_host = canonical_bind_host(host)
     desk = Desk(root)
-    handler = _handler_for(desk)
+    desk_auth = DeskAuth(root)
+    handler = _handler_for(desk, desk_auth, bind_host)
     ThreadingHTTPServer.allow_reuse_address = True
-    return ThreadingHTTPServer(("127.0.0.1", port), handler)
+    return ThreadingHTTPServer((bind_host, port), handler)
 
 
-def _handler_for(desk: Desk) -> type:
+class _Request:  # pylint: disable=too-few-public-methods
+    """One HTTP request after the host and session checks."""
+
+    def __init__(self, client: str) -> None:
+        self.client = client
+        self.cookie_out = ""
+        self.raw = b""
+        self.form: Dict[str, str] = {}
+        self.session = Session(user="", csrf="", exp=0)
+        self.direct = False
+        self.host_name = ""
+
+
+def _handler_for(desk: Desk, desk_auth: DeskAuth, bind_host: str) -> type:
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
+        _req: _Request
 
         def do_GET(self) -> None:  # noqa: N802
             self._dispatch("GET")
@@ -77,17 +105,78 @@ def _handler_for(desk: Desk) -> type:
             del format, args
 
         def _dispatch(self, method: str) -> None:
+            self._req = _Request(self.client_address[0])
             try:
-                actor_for(self.headers, self.client_address[0])
-            except DeskError as exc:
-                self._plain(403, str(exc))
-                return
-            try:
+                if method == "POST":
+                    self._req.raw = self._body()
+                if not self._admit(method):
+                    return
                 self._route(method)
             except DeskError as exc:
                 self._error_page(str(exc))
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 self._plain(500, f"Something went wrong: {exc}")
+
+        def _admit(self, method: str) -> bool:
+            decision = self._decision(method)
+            if decision is None:
+                return True
+            status, message = decision
+            if status == 303:
+                self._redirect(message)
+            else:
+                self._plain(status, message)
+            return False
+
+        def _decision(self, method: str) -> Optional[Tuple[int, str]]:
+            host_header = self.headers.get("Host", "") or ""
+            self._req.host_name = hostname_of(host_header)
+            if not host_allowed(host_header, bind_host):
+                return 400, "This desk does not accept that host name."
+            if self._req.client not in LOOPBACK and not is_tailscale_ip(self._req.client):
+                return 403, "This desk accepts this computer or a Tailscale address only."
+            self._open_session()
+            if method == "POST":
+                self._req.form = _form(self.headers.get("Content-Type", ""), self._req.raw)
+                token = self._req.form.get("csrf", "")
+                if not desk_auth.csrf_ok(self._req.session, token):
+                    return 403, "The form token did not match. Reload the page and try again."
+            if self._req.direct:
+                return None
+            return self._remote_decision(method)
+
+        def _remote_decision(self, method: str) -> Optional[Tuple[int, str]]:
+            path = urlparse(self.path).path
+            if not desk_auth.password_is_set():
+                return (
+                    403,
+                    "Set a password with bittytax_web --set-password "
+                    "before opening this desk from another device.",
+                )
+            if method == "GET" and path.startswith("/static/"):
+                return None
+            if path == "/login":
+                return None
+            if self._req.session.user:
+                return None
+            if method == "GET":
+                target = self.path
+                if not target.startswith("/") or target.startswith("//"):
+                    target = "/"
+                return 303, "/login?next=" + quote(target, safe="/?=&")
+            return 403, "Sign in before sending that form."
+
+        def _open_session(self) -> None:
+            self._req.direct = is_direct_loopback(self._req.host_name, self._req.client)
+            found = desk_auth.open_session(self.headers.get("Cookie", "") or "")
+            self._remember(found if found is not None else desk_auth.new_session())
+
+        def _remember(self, session: Session) -> None:
+            self._req.session = session
+            if not session.fresh:
+                return
+            secure = cookie_is_secure(self._req.host_name, self._req.client, self.headers)
+            self._req.cookie_out = desk_auth.cookie(session, secure=secure)
 
         def _route(self, method: str) -> None:
             parsed = urlparse(self.path)
@@ -95,6 +184,15 @@ def _handler_for(desk: Desk) -> type:
             query = parse_qs(parsed.query)
             if path.startswith("/static/"):
                 self._static(path)
+                return
+            if path == "/login" and method == "GET":
+                self._login_get()
+                return
+            if path == "/login" and method == "POST":
+                self._login_post()
+                return
+            if path == "/logout" and method == "POST":
+                self._logout()
                 return
             row = _ROW_PATH.match(path)
             if row and method == "GET":
@@ -129,7 +227,7 @@ def _handler_for(desk: Desk) -> type:
             self._page("import.html", "Import", section="import", error="")
 
         def _import_post(self) -> None:
-            filename, payload = _uploaded_file(self.headers.get("Content-Type", ""), self._body())
+            filename, payload = _uploaded_file(self.headers.get("Content-Type", ""), self._req.raw)
             entry = desk.import_bytes(filename, payload)
             self._redirect(f"/import?imported={quote(entry['id'])}")
 
@@ -160,15 +258,61 @@ def _handler_for(desk: Desk) -> type:
             )
 
         def _reclassify(self, row_id: str) -> None:
-            form = _form(self.headers.get("Content-Type", ""), self._body())
+            form = self._req.form
             try:
-                actor = actor_for(self.headers, self.client_address[0])
+                actor = actor_for(
+                    self.headers,
+                    self._req.client,
+                    host=self._req.host_name,
+                    session_user=self._req.session.user,
+                )
                 desk.reclassify(row_id, _form_value(form, "type"), _form_value(form, "why"), actor)
             except DeskError as exc:
                 self._transaction(row_id, str(exc))
                 return
             import_id, seq = row_id.split(":", 1)
             self._redirect(f"/transactions/{import_id}/{seq}?saved=1")
+
+        def _login_get(self) -> None:
+            if self._req.session.user:
+                nxt = _field(parse_qs(urlparse(self.path).query), "next")
+                self._redirect(safe_next(nxt or "/"))
+                return
+            self._login_form("")
+
+        def _login_post(self) -> None:
+            if not desk_auth.password_is_set():
+                self._plain(
+                    403, "Set a password with bittytax_web --set-password before signing in."
+                )
+                return
+            if desk_auth.limiter.blocked(self._req.client):
+                self._plain(429, "Too many sign-in attempts. Wait and try again.")
+                return
+            if not desk_auth.check_password(self._req.form.get("password", "")):
+                desk_auth.limiter.fail(self._req.client)
+                if desk_auth.limiter.blocked(self._req.client):
+                    self._plain(429, "Too many sign-in attempts. Wait and try again.")
+                    return
+                self._login_form("That password did not match.")
+                return
+            desk_auth.limiter.clear(self._req.client)
+            header_user = trusted_tailscale_user(
+                self.headers, self._req.client, self._req.host_name
+            )
+            user = header_user or desk_auth.stored_user() or "desk"
+            self._remember(desk_auth.new_session(user))
+            self._redirect(safe_next(self._req.form.get("next", "/")))
+
+        def _login_form(self, error: str) -> None:
+            nxt = self._req.form.get("next") or _field(parse_qs(urlparse(self.path).query), "next")
+            self._page(
+                "login.html", "Sign in", section="login", error=error, next=safe_next(nxt or "/")
+            )
+
+        def _logout(self) -> None:
+            self._remember(desk_auth.new_session())
+            self._redirect("/")
 
         def _review(self, query: Mapping[str, List[str]]) -> None:
             year = _year(_field(query, "tax_year"))
@@ -214,14 +358,20 @@ def _handler_for(desk: Desk) -> type:
             context.setdefault("error", "")
             context.setdefault("saved", "saved" in parse_qs(urlparse(self.path).query))
             context.setdefault("imported", _field(parse_qs(urlparse(self.path).query), "imported"))
+            self._identity(context)
             body = _ENV.get_template(template).render(title=title, **context)
             self._send(200, body.encode("utf-8"), "text/html; charset=utf-8")
 
         def _error_page(self, message: str) -> None:
-            body = _ENV.get_template("error.html").render(
-                title="Problem", section="", error=message
-            )
+            context: Dict[str, Any] = {"title": "Problem", "section": "", "error": message}
+            self._identity(context)
+            body = _ENV.get_template("error.html").render(**context)
             self._send(400, body.encode("utf-8"), "text/html; charset=utf-8")
+
+        def _identity(self, context: Dict[str, Any]) -> None:
+            context.setdefault("csrf", self._req.session.csrf)
+            context.setdefault("signed_in", bool(self._req.session.user))
+            context.setdefault("actor", self._req.session.user)
 
         def _static(self, path: str) -> None:
             name = path[len("/static/") :]
@@ -240,6 +390,7 @@ def _handler_for(desk: Desk) -> type:
             self.send_header("Location", location)
             self.send_header("Content-Length", "0")
             self._security_headers()
+            self._cookie_header()
             self.end_headers()
 
         def _plain(self, status: int, message: str) -> None:
@@ -252,8 +403,13 @@ def _handler_for(desk: Desk) -> type:
             if download:
                 self.send_header("Content-Disposition", f'attachment; filename="{download}"')
             self._security_headers()
+            self._cookie_header()
             self.end_headers()
             self.wfile.write(body)
+
+        def _cookie_header(self) -> None:
+            if self._req.cookie_out:
+                self.send_header("Set-Cookie", self._req.cookie_out)
 
         def _security_headers(self) -> None:
             self.send_header("X-Content-Type-Options", "nosniff")

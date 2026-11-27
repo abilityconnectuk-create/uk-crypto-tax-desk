@@ -52,7 +52,7 @@ If you are upgrading from a previous version of BittyTax, please follow the [upg
 
 ## Local web desk
 
-A browser desk sits on the same calculator. It binds to `127.0.0.1` only and reads a directory on your machine. It does not upload transactions and it does not call a price service. There is no login in this version. A later copy reached over a private network should add one, and should not be published on the open internet.
+A browser desk sits on the same calculator. It binds to `127.0.0.1` and reads a directory on your machine. It does not upload transactions and it does not call a price service. On this computer the page does not ask for a password. A phone or another laptop reaches it through Tailscale Serve, on your tailnet only, and then a password is required. Do not publish the desk on the public internet.
 
 This is not tax advice. BittyTax is copyright Nano Nano Ltd and licensed under AGPL-3.0. See [License/Disclaimer](#licensedisclaimer).
 
@@ -95,6 +95,82 @@ bittytax --nopdf --taxyear 2026 --skip-holdings ~/.uk-crypto-tax-desk/effective-
 ```
 
 The capital gains and income figures match. `examples/web-sample-review-koinly.csv`, with `examples/web-sample-wallets.yaml` copied to `wallets.yaml` in the data directory, exercises unmatched transfers, spam, an unmapped tag and a missing cost basis.
+
+### Open it from your phone (Tailscale)
+
+This stays on your tailnet. The desk keeps listening on `127.0.0.1`. Tailscale Serve on the Mac proxies `https://<mac>.<tailnet>.ts.net` to that address. Do not run `tailscale funnel`. Funnel publishes the address on the public internet. If Funnel was turned on for this port, the port stays public until Serve is configured again.
+
+The Mac has to stay awake, online, and signed in to Tailscale. The phone signs in to the same tailnet.
+
+1. Install Tailscale on the Mac from <https://tailscale.com/download/macos> (or the Mac App Store) and sign in. Install it on the phone and sign in to the same tailnet.
+2. From a checkout of this repository, install the desk if you have not already:
+
+```bash
+python3 -m pip install -e .
+```
+
+3. Set a password. It is stored only in the data directory (`~/.uk-crypto-tax-desk/` unless you passed `--data-dir`), never in this repository. The prompt does not put the password on the command line:
+
+```bash
+bittytax_web --set-password --user mark
+```
+
+`--user` is optional. It is the name written on the change log when Tailscale does not send one. When Serve sends `Tailscale-User-Login`, that name is used instead.
+
+4. Start the desk and leave it running:
+
+```bash
+bittytax_web --no-browser
+```
+
+On the Mac, open <http://127.0.0.1:8765/>. That address does not ask for the password.
+
+5. In another terminal, proxy the tailnet name to the desk. The first time, Tailscale may ask you to turn on HTTPS certificates for the tailnet. Say yes. `--bg` keeps the proxy after you close the terminal:
+
+```bash
+tailscale serve --bg 8765
+tailscale serve status
+```
+
+6. On the phone, open the `https://….ts.net` address from `tailscale serve status` and sign in with the password.
+
+To stop sharing, reset the proxy. The desk can keep running on the Mac:
+
+```bash
+tailscale serve reset
+```
+
+If `tailscale serve` is in the foreground without `--bg`, Ctrl+C stops it as well.
+
+Optional: start the desk at login. This does not start the proxy, and it must not contain the password. Put the full path from `which bittytax_web` into `~/Library/LaunchAgents/uk.crypto.tax.desk.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>uk.crypto.tax.desk</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/full/path/from/which/bittytax_web</string>
+        <string>--no-browser</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+</dict>
+</plist>
+```
+
+```bash
+launchctl load ~/Library/LaunchAgents/uk.crypto.tax.desk.plist
+```
+
+`launchctl unload ~/Library/LaunchAgents/uk.crypto.tax.desk.plist` stops that. `tailscale serve --bg 8765` is still a separate step, run once; the Mac must be awake for either of them to answer.
+
+The recommended path is Serve in front of `127.0.0.1`. `--host` also accepts one Tailscale interface address in `100.64.0.0/10`. `0.0.0.0` and every other address are refused.
 
 ## Transaction Records
 BittyTax is only as accurate as the data you provide it. This means it's essential that you keep records of ALL cryptoasset transactions, which includes not just trades but also records of spending, income, gifts sent or received, etc.
