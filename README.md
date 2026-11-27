@@ -50,6 +50,52 @@ You will need Python installed on your machine before you can install BittyTax, 
 
 If you are upgrading from a previous version of BittyTax, please follow the [upgrade](https://github.com/BittyTax/BittyTax/wiki/Upgrade) instructions.
 
+## Local web desk
+
+A browser desk sits on the same calculator. It binds to `127.0.0.1` only and reads a directory on your machine. It does not upload transactions and it does not call a price service. There is no login in this version. A later copy reached over a private network should add one, and should not be published on the open internet.
+
+This is not tax advice. BittyTax is copyright Nano Nano Ltd and licensed under AGPL-3.0. See [License/Disclaimer](#licensedisclaimer).
+
+### Install on a Mac
+
+Install Python 3.10 or newer, then, from a checkout of this repository:
+
+```bash
+python3 -m pip install -e .
+```
+
+### Start
+
+```bash
+bittytax_web
+```
+
+`python3 -m bittytax.web` is the same command. A browser window opens at <http://127.0.0.1:8765/>. Pass `--no-browser` to skip that. The data directory defaults to `~/.uk-crypto-tax-desk/`.
+
+```bash
+bittytax_web --data-dir ~/Documents/crypto-tax --no-browser
+```
+
+`UK_CRYPTO_TAX_DESK_DATA` sets the same directory when `--data-dir` is omitted. Put an optional `wallets.yaml` in that directory (start from `examples/wallets.example.yaml`). The Config page shows it and does not edit it. Do not commit a real `wallets.yaml` or the data directory.
+
+Each import keeps the original file, and records its SHA-256 hash, row count and date range. Changing a transaction type appends a line to a log (who, when, why). The report reads the derived ledger, not the raw file. Running the same report again on the same ledger produces the same figures. The default tax year is 2025/26 (6 April 2025 to 5 April 2026, Europe/London). 2024/25 still runs, including the calculator's 30 October 2024 split.
+
+### Manual check
+
+`examples/web-sample-koinly.csv` is invented data.
+
+1. Start the desk.
+2. Import that CSV.
+3. Open the row whose note is "sample gift to reclassify". The converter's conservative rules record that untagged deposit as Review-Acquisition. Change the type to Income and give a reason. The log gains a line. The CSV you uploaded does not change.
+4. Open Report, leave the year as 2025/26, and run it.
+5. Compare with the command-line calculator on the derived records (not the raw Koinly file):
+
+```bash
+bittytax --nopdf --taxyear 2026 --skip-holdings ~/.uk-crypto-tax-desk/effective-records.csv
+```
+
+The capital gains and income figures match. `examples/web-sample-review-koinly.csv`, with `examples/web-sample-wallets.yaml` copied to `wallets.yaml` in the data directory, exercises unmatched transfers, spam, an unmapped tag and a missing cost basis.
+
 ## Transaction Records
 BittyTax is only as accurate as the data you provide it. This means it's essential that you keep records of ALL cryptoasset transactions, which includes not just trades but also records of spending, income, gifts sent or received, etc.
 

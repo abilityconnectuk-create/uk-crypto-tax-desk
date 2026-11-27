@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block body %}
+    <h1>Local tax desk</h1>
+    <p class="lede">Imports stay in the data directory on this computer. Reports are calculated by BittyTax. Nothing is sent to a remote service.</p>
+    <ul class="stats">
+        <li><strong>{{ counts.transactions }}</strong> transactions</li>
+        <li><strong>{{ counts.imports }}</strong> imports</li>
+        <li><strong>{{ counts.queue }}</strong> on the review queue</li>
+        <li><strong>{{ counts.needs_review }}</strong> need review</li>
+        <li><strong>{{ counts.spam }}</strong> possible spam</li>
+        <li><strong>{{ counts.unmapped }}</strong> unmapped tags</li>
+    </ul>
+    {% if imports %}
+        <h2>Imports</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>File</th>
+                    <th>Rows</th>
+                    <th>Dates</th>
+                    <th>Hash</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in imports %}
+                    <tr>
+                        <td>{{ item.filename }}</td>
+                        <td>{{ item.row_count }}</td>
+                        <td>{{ item.date_min }} – {{ item.date_max }}</td>
+                        <td><code>{{ item.sha256[:12] }}</code></td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>No files imported yet. Start with a Koinly CSV, or any export the conversion tool already recognises.</p>
+    {% endif %}
+{% endblock %}

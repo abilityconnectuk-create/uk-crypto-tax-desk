@@ -5,3 +5,5 @@ include src/bittytax/resources/bittytax.conf.template
 include src/bittytax/templates/*.html
 include src/bittytax/templates/css/*.html
 include src/bittytax/templates/img/*.html
+include src/bittytax/web/templates/*.html
+include src/bittytax/web/static/*.css

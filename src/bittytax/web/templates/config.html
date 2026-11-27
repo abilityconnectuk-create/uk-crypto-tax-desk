@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block body %}
+    <h1>Config</h1>
+    <p class="lede">Read only. Editing the wallet register or the calculator config is not part of this desk.</p>
+    <h2>Calculator</h2>
+    <p>File: <code>{{ config.calculator_config }}</code></p>
+    <p>Local currency {{ config.local_currency }}. Time zone {{ config.local_timezone }}.</p>
+    <table>
+        <thead>
+            <tr>
+                <th>Setting</th>
+                <th>Value</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in config.settings %}
+                <tr>
+                    <td>{{ item.name }}</td>
+                    <td>{{ item.value }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% if config.secrets %}
+        <h3>Keys</h3>
+        <p>Stored keys are masked.</p>
+        <table>
+            <tbody>
+                {% for item in config.secrets %}
+                    <tr>
+                        <th>{{ item.name }}</th>
+                        <td>{{ item.value }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+    <h2>Wallet register</h2>
+    {% if config.wallets_present %}
+        <p>File: <code>{{ config.wallets_path }}</code></p>
+        {% if config.wallet_labels %}
+            <ul>
+                {% for label in config.wallet_labels %}
+                    <li>{{ label }}</li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+        {% if config.match %}
+            <h3>Match</h3>
+            <pre>{{ config.match }}</pre>
+        {% endif %}
+        {% if config.match_overrides %}
+            <h3>Match overrides</h3>
+            <pre>{{ config.match_overrides }}</pre>
+        {% endif %}
+    {% else %}
+        <p>No <code>wallets.yaml</code> in the data directory. The example in the repository is <code>examples/wallets.example.yaml</code>. Copy it into the data directory and edit the copy. Do not commit a real register.</p>
+    {% endif %}
+{% endblock %}

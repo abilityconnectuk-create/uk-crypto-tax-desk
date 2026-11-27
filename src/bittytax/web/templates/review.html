@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block body %}
+    <h1>Review</h1>
+    <p class="lede">Unmatched transfers, spam and unmapped tags come from the conversion tool's reconciliation. Missing cost basis comes from the calculator for {{ review.label }}.</p>
+    <form method="get" action="/review">
+        <label for="tax_year">Tax year for missing cost</label>
+        <select id="tax_year" name="tax_year">
+            {% for item in years %}
+                <option value="{{ item.year }}"
+                        {% if item.year == tax_year %}selected{% endif %}>{{ item.label }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit">Show</button>
+    </form>
+    {% if not review.integrity_ok %}
+        <p class="warn">The calculator's integrity check failed. Unresolved review-queue withdrawals are the usual reason. The queues below are the converter's own lists.</p>
+    {% endif %}
+    <h2>Unmatched transfers</h2>
+    <h3>Needs review</h3>
+    {% if review.needs_review %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Asset</th>
+                    <th>Quantity</th>
+                    <th>Wallet</th>
+                    <th>Disposition</th>
+                    <th>Detail</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in review.needs_review %}
+                    <tr>
+                        <td>{{ row.timestamp }}</td>
+                        <td>{{ row.asset }}</td>
+                        <td>{{ row.quantity }}</td>
+                        <td>{{ row.wallet }}</td>
+                        <td>{{ row.disposition }}</td>
+                        <td>{{ row.description }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>None.</p>
+    {% endif %}
+    <h3>Review queue</h3>
+    {% if review.queue %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Asset</th>
+                    <th>Quantity</th>
+                    <th>Wallet</th>
+                    <th>Disposition</th>
+                    <th>Detail</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in review.queue %}
+                    <tr>
+                        <td>{{ row.timestamp }}</td>
+                        <td>{{ row.asset }}</td>
+                        <td>{{ row.quantity }}</td>
+                        <td>{{ row.wallet }}</td>
+                        <td>{{ row.disposition }}</td>
+                        <td>{{ row.description }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>None.</p>
+    {% endif %}
+    <h2>Possible spam</h2>
+    {% if review.spam %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Asset</th>
+                    <th>Quantity</th>
+                    <th>Wallet</th>
+                    <th>Disposition</th>
+                    <th>Detail</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in review.spam %}
+                    <tr>
+                        <td>{{ row.timestamp }}</td>
+                        <td>{{ row.asset }}</td>
+                        <td>{{ row.quantity }}</td>
+                        <td>{{ row.wallet }}</td>
+                        <td>{{ row.disposition }}</td>
+                        <td>{{ row.description }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>None.</p>
+    {% endif %}
+    <h2>Unmapped Koinly tags</h2>
+    {% if review.unmapped %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Asset</th>
+                    <th>Wallet</th>
+                    <th>Note</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in review.unmapped %}
+                    <tr>
+                        <td><a href="/transactions/{{ row.id.split(':')[0] }}/{{ row.id.split(':')[1] }}">{{ row.timestamp }}</a></td>
+                        <td>{{ row.type }}</td>
+                        <td>{{ row.asset }}</td>
+                        <td>{{ row.wallet }}</td>
+                        <td>{{ row.note }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>No unmapped tags in the ledger.</p>
+    {% endif %}
+    <h2>Missing cost basis</h2>
+    {% if review.missing_cost %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Asset</th>
+                    <th>Quantity</th>
+                    <th>Proceeds</th>
+                    <th>Missing cost</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in review.missing_cost %}
+                    <tr>
+                        <td>{{ row.date }}</td>
+                        <td>{{ row.asset }}</td>
+                        <td>{{ row.quantity }}</td>
+                        <td>{{ row.proceeds | gbp }}</td>
+                        <td>{{ row.missing_cost | gbp }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>The calculator did not record a missing cost for this year.</p>
+    {% endif %}
+{% endblock %}

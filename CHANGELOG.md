@@ -9,6 +9,7 @@ The price data cache format has been updated to correctly distinguish assets tha
 The new `price_via_btc` config option may not exist in your config file. If it is missing, BittyTax keeps the legacy BTC-intermediate behaviour for backward compatibility. Add `price_via_btc: False` to your config if you want historic prices to use direct local currency lookups.
 
 ### Added
+- Local web desk: `bittytax_web` or `python -m bittytax.web` serves a loopback UI for import, reclassification, review queues and a tax-year report. Figures come from the existing calculator. Uploads are kept unchanged.
 - Conversion tool: `match_overrides` holds listed hashes unmatched and can force a transfer or an exchange before the other matchers. Both are written to the transfer summary. `bridges.<name>.same_asset_only` refuses a token-change in-leg on that route, so a missing receive stays a missing destination.
 - Conversion tool: `receipt_tokens` (default empty) books a venue deposit as an exchange when the same hash receives the receipt asset. A deposit with no receipt leg stays on review.
 - Conversion tool: a bridge with several in-legs takes the closest unused one whose amount fits. The same asset is preferred when both in-legs fit. A token change is an exchange and the same asset is a transfer.

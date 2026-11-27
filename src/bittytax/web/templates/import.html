@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block body %}
+    <h1>Import</h1>
+    <p class="lede">The file is stored byte for byte. A derived ledger is written beside it. Reclassifying a row later does not change the upload.</p>
+    {% if imported %}
+        <p class="note">Imported {{ imported }}. The original file is unchanged.</p>
+    {% endif %}
+    {% if error %}
+        <p class="warn">{{ error }}</p>
+    {% endif %}
+    <form method="post" action="/import" enctype="multipart/form-data">
+        <label for="file">Koinly CSV, or another supported export</label>
+        <input id="file" name="file" type="file" required>
+        <button type="submit">Import</button>
+    </form>
+    <p>Each import records the file hash, the row count and the date range. Importing the same bytes again is refused.</p>
+{% endblock %}

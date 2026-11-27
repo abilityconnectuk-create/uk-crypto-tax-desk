@@ -1,0 +1,5 @@
+Date,Type,Tag,Sending Wallet,Sent Amount,Sent Currency,Sent Cost Basis,Receiving Wallet,Received Amount,Received Currency,Received Cost Basis,Fee Amount,Fee Currency,Gain (GBP),Net Value (GBP),Fee Value (GBP),TxSrc,TxDest,TxHash,Description
+2025-06-01 12:00:00,crypto_deposit,mysterylabel,,,,,Example Exchange,10,DOGE,,,,,5,,,,sample-tx-doge,unmapped tag sample
+2025-06-02 12:00:00,crypto_deposit,,,,,,Example Exchange,100,SCAM,,,,,1,,,,sample-tx-scam,spam token sample
+2025-06-03 12:00:00,crypto_withdrawal,,Example Exchange,0.05,ETH,,,,,,,,,100,,,0x2222222222222222222222222222222222222222,sample-tx-unmatched,unmatched send sample
+2025-06-04 12:00:00,exchange,,Example Exchange,1,ETH,,Example Exchange,3000,GBP,,,,,3000,,,,sample-tx-oversell,sale with no pool
