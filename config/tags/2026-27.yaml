@@ -1,0 +1,406 @@
+# Transaction tags. Fork of BittyTax (AGPL-3.0). See LICENSE.
+# Every confirmed flag is false. Unconfirmed tags do not change filed figures.
+tax_year: 2026-27
+ending_year: 2027
+confirmed: false
+banner: awaiting owner approval
+note: Stub for the year ending 5 April 2027. Copied so the year has a file. It is not a new determination.
+  Every tag stays unconfirmed.
+cashback_cost:
+  value: nil
+  choices:
+  - nil
+  - market
+  confirmed: false
+  note: Default acquisition cost of a cashback is nil. Market value at receipt is the other switch. Neither
+    is applied while this entry is unconfirmed.
+  sources:
+  - title: Statement of Practice 4 (1997)
+    url: https://www.gov.uk/government/publications/statement-of-practice-4-1997/statement-of-practice-4-1997
+  - title: BIM100210
+    url: https://www.gov.uk/hmrc-internal-manuals/business-income-manual/bim100210
+no_tag:
+  effect: default_by_type
+  confirmed: false
+  note: A row with no tag keeps the treatment of its transaction type.
+  sources:
+  - title: CRYPTO22100
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto22100
+tags:
+- id: reward
+  label: Reward
+  effect: miscellaneous_income
+  confirmed: false
+  note: Miscellaneous income at sterling value on receipt. The same value is the pool cost.
+  sources:
+  - title: Check if you need to pay tax when you receive cryptoassets
+    url: https://www.gov.uk/guidance/check-if-you-need-to-pay-tax-when-you-receive-cryptoassets
+  - title: Self Assessment tax return SA100
+    url: https://www.gov.uk/government/publications/self-assessment-tax-return-sa100
+  - title: HS325 Other taxable income
+    url: https://www.gov.uk/government/publications/other-taxable-income-hs325-self-assessment-helpsheet
+  - title: ITTOIA 2005 section 687
+    url: https://www.legislation.gov.uk/ukpga/2005/5/section/687
+  calculator_type: Staking-Reward
+  boxes: SA100 TR3 box 17, expenses box 18
+- id: mining
+  label: Mining
+  effect: miscellaneous_income
+  confirmed: false
+  note: Mining receipts are miscellaneous income, not employment income, at this desk.
+  sources:
+  - title: Check if you need to pay tax when you receive cryptoassets
+    url: https://www.gov.uk/guidance/check-if-you-need-to-pay-tax-when-you-receive-cryptoassets
+  - title: Self Assessment tax return SA100
+    url: https://www.gov.uk/government/publications/self-assessment-tax-return-sa100
+  - title: HS325 Other taxable income
+    url: https://www.gov.uk/government/publications/other-taxable-income-hs325-self-assessment-helpsheet
+  - title: ITTOIA 2005 section 687
+    url: https://www.legislation.gov.uk/ukpga/2005/5/section/687
+  calculator_type: Mining
+  boxes: SA100 TR3 box 17, expenses box 18
+- id: lending_interest
+  label: Lending interest
+  effect: miscellaneous_income
+  confirmed: false
+  note: Interest on a loan of tokens is miscellaneous income. It is not a capital return.
+  sources:
+  - title: Check if you need to pay tax when you receive cryptoassets
+    url: https://www.gov.uk/guidance/check-if-you-need-to-pay-tax-when-you-receive-cryptoassets
+  - title: Self Assessment tax return SA100
+    url: https://www.gov.uk/government/publications/self-assessment-tax-return-sa100
+  - title: HS325 Other taxable income
+    url: https://www.gov.uk/government/publications/other-taxable-income-hs325-self-assessment-helpsheet
+  - title: ITTOIA 2005 section 687
+    url: https://www.legislation.gov.uk/ukpga/2005/5/section/687
+  calculator_type: Interest
+  boxes: SA100 TR3 box 17, expenses box 18
+- id: other_income
+  label: Other income
+  effect: miscellaneous_income
+  confirmed: false
+  note: Other crypto receipts that are income go to miscellaneous income.
+  sources:
+  - title: Check if you need to pay tax when you receive cryptoassets
+    url: https://www.gov.uk/guidance/check-if-you-need-to-pay-tax-when-you-receive-cryptoassets
+  - title: Self Assessment tax return SA100
+    url: https://www.gov.uk/government/publications/self-assessment-tax-return-sa100
+  - title: HS325 Other taxable income
+    url: https://www.gov.uk/government/publications/other-taxable-income-hs325-self-assessment-helpsheet
+  - title: ITTOIA 2005 section 687
+    url: https://www.legislation.gov.uk/ukpga/2005/5/section/687
+  calculator_type: Income
+  boxes: SA100 TR3 box 17, expenses box 18
+- id: salary
+  label: Salary
+  effect: employment
+  confirmed: false
+  note: Salary is employment income. The return box is not yet confirmed. It is not miscellaneous income
+    and it is not SA100 TR3 box 17.
+  sources:
+  - title: Check if you need to pay tax when you receive cryptoassets
+    url: https://www.gov.uk/guidance/check-if-you-need-to-pay-tax-when-you-receive-cryptoassets
+  - title: ITEPA 2003 section 62
+    url: https://www.legislation.gov.uk/ukpga/2003/1/section/62
+  boxes: employment, box not yet confirmed
+  flag: employment
+- id: airdrop
+  label: Airdrop
+  effect: airdrop
+  confirmed: false
+  note: No automatic treatment. Choose income if a service or condition was attached. Otherwise it is
+    an acquisition at market value, or at nil if the tokens were newly minted.
+  sources:
+  - title: CRYPTO21250
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto21250
+  - title: CRYPTO22350
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto22350
+  - title: TCGA 1992 section 17
+    url: https://www.legislation.gov.uk/ukpga/1992/12/section/17
+  choices:
+  - income
+  - market
+  - nil
+- id: fork
+  label: Fork
+  effect: fork
+  confirmed: false
+  note: A fork is not income. Apportion the cost between the old and the new tokens on a just and reasonable
+    basis. This file does not invent the split ratio.
+  sources:
+  - title: CRYPTO22300
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto22300
+  calculator_type: Fork
+- id: loan
+  label: Loan
+  effect: acquisition
+  confirmed: false
+  note: A loan of tokens is an acquisition, not income. Cost is the sterling market value at drawdown.
+  sources:
+  - title: CRYPTO61630
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61630
+  calculator_type: Loan
+- id: margin_loan
+  label: Margin loan
+  effect: acquisition
+  confirmed: false
+  note: A margin loan is an acquisition, not income.
+  sources:
+  - title: CRYPTO61630
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61630
+  calculator_type: Loan
+- id: loan_repay
+  label: Loan repay
+  effect: disposal
+  confirmed: false
+  note: Repaying a loan is a disposal of the tokens handed over.
+  sources:
+  - title: CRYPTO61650
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61650
+  - title: CRYPTO61620
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61620
+  calculator_type: Loan-Repayment
+- id: margin_repay
+  label: Margin repay
+  effect: disposal
+  confirmed: false
+  note: Repaying a margin loan is a disposal of the tokens handed over.
+  sources:
+  - title: CRYPTO61650
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61650
+  calculator_type: Loan-Repayment
+- id: cost
+  label: Cost
+  effect: disposal_allowable
+  confirmed: false
+  note: A fee paid in tokens is a disposal of the fee token. It is allowable only within section 38.
+  sources:
+  - title: TCGA 1992 section 38
+    url: https://www.legislation.gov.uk/ukpga/1992/12/section/38
+  - title: CRYPTO22150
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto22150
+  calculator_type: Spend
+- id: other_fee
+  label: Other fee
+  effect: disposal_allowable
+  confirmed: false
+  note: Another fee paid in tokens is a disposal of the fee token, allowable only within section 38.
+  sources:
+  - title: TCGA 1992 section 38
+    url: https://www.legislation.gov.uk/ukpga/1992/12/section/38
+  - title: CRYPTO22150
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto22150
+  calculator_type: Spend
+- id: tax
+  label: Tax
+  effect: disposal_not_allowable
+  confirmed: false
+  note: Tax paid in tokens is a disposal. It is not an allowable cost under section 38.
+  sources:
+  - title: TCGA 1992 section 38
+    url: https://www.legislation.gov.uk/ukpga/1992/12/section/38
+  calculator_type: Spend
+- id: loan_fee
+  label: Loan fee
+  effect: disposal_memo
+  confirmed: false
+  note: A loan fee paid in tokens is a disposal. A memo records the fee. It is not income.
+  sources:
+  - title: CRYPTO61650
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61650
+  - title: TCGA 1992 section 38
+    url: https://www.legislation.gov.uk/ukpga/1992/12/section/38
+  calculator_type: Spend
+  memo: Loan fee. Disposal plus a memo.
+- id: margin_fee
+  label: Margin fee
+  effect: disposal_memo
+  confirmed: false
+  note: A spot margin fee paid in tokens is a disposal plus a memo. It does not feed the futures miscellaneous-income
+    result.
+  sources:
+  - title: CRYPTO22150
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto22150
+  - title: TCGA 1992 section 38
+    url: https://www.legislation.gov.uk/ukpga/1992/12/section/38
+  calculator_type: Spend
+  memo: Spot margin fee. Disposal plus a memo.
+- id: realised_pnl
+  label: Realised profit and loss
+  effect: futures_realised
+  confirmed: false
+  note: Realised futures result feeds miscellaneous income on SA100 TR3 boxes 17 and 18. A futures loss
+    never offsets capital gains.
+  sources:
+  - title: CRYPTO10150
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto10150
+  - title: HS325 Other taxable income
+    url: https://www.gov.uk/government/publications/other-taxable-income-hs325-self-assessment-helpsheet
+  boxes: SA100 TR3 box 17, expenses box 18
+  offsets_capital_gains: false
+- id: futures_fee
+  label: Futures fee
+  effect: futures_fee
+  confirmed: false
+  note: A futures trading fee feeds the futures miscellaneous-income result. It does not offset capital
+    gains.
+  sources:
+  - title: CRYPTO10150
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto10150
+  boxes: SA100 TR3 box 17, expenses box 18
+  offsets_capital_gains: false
+- id: funding_fee
+  label: Funding fee
+  effect: futures_funding
+  confirmed: false
+  note: A funding fee feeds the futures miscellaneous-income result. It does not offset capital gains.
+  sources:
+  - title: CRYPTO10150
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto10150
+  boxes: SA100 TR3 box 17, expenses box 18
+  offsets_capital_gains: false
+- id: swap
+  label: Swap
+  effect: disposal
+  confirmed: false
+  note: A swap is a disposal of the token given up, at the market value of the token received.
+  sources:
+  - title: CRYPTO22100
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto22100
+  calculator_type: Trade
+- id: liquidity_in
+  label: Liquidity in
+  effect: exchange
+  confirmed: false
+  note: Tokens put into a liquidity pool are an exchange at market value.
+  sources:
+  - title: CRYPTO61620
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61620
+  calculator_type: Trade
+- id: liquidity_out
+  label: Liquidity out
+  effect: exchange
+  confirmed: false
+  note: Tokens taken out of a liquidity pool are an exchange at market value.
+  sources:
+  - title: CRYPTO61650
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61650
+  calculator_type: Trade
+- id: pool_in
+  label: Pool in
+  effect: pool
+  confirmed: false
+  note: Not a disposal only if the same token returns from restricted custody. A receipt token or a different
+    token is an exchange. An unclassified protocol defaults to an exchange.
+  sources:
+  - title: CRYPTO61640
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61640
+  - title: CRYPTO61620
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61620
+  default: exchange
+  protocols: {}
+- id: pool_out
+  label: Pool out
+  effect: pool
+  confirmed: false
+  note: Not a disposal only if the same token returns from restricted custody. A receipt token or a different
+    token is an exchange. An unclassified protocol defaults to an exchange.
+  sources:
+  - title: CRYPTO61640
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61640
+  - title: CRYPTO61650
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61650
+  default: exchange
+  protocols: {}
+- id: gift
+  label: Gift
+  effect: gift
+  confirmed: false
+  note: A gift to a spouse or civil partner is no gain and no loss. Any other gift is a disposal at market
+    value.
+  sources:
+  - title: TCGA 1992 section 58
+    url: https://www.legislation.gov.uk/ukpga/1992/12/section/58
+  - title: TCGA 1992 section 17
+    url: https://www.legislation.gov.uk/ukpga/1992/12/section/17
+- id: donation
+  label: Donation
+  effect: charity
+  confirmed: false
+  note: A gift to a charity is no gain and no loss.
+  sources:
+  - title: TCGA 1992 section 257
+    url: https://www.legislation.gov.uk/ukpga/1992/12/section/257
+  calculator_type: Charity-Sent
+- id: lost
+  label: Lost
+  effect: keep_in_pool
+  confirmed: false
+  note: Losing the private key is not a disposal. The tokens stay in the pool. A negligible-value claim
+    is a separate step if there is no prospect of recovery.
+  sources:
+  - title: CRYPTO22400
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto22400
+  - title: CRYPTO22500
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto22500
+  hint: Negligible-value claims are recorded on their own page. This tag does not file one.
+- id: stolen
+  label: Stolen
+  effect: keep_in_pool
+  confirmed: false
+  note: Theft is not a disposal. The tokens stay in the pool. A negligible-value claim is only a hint
+    here, not an automatic loss.
+  sources:
+  - title: CRYPTO22450
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto22450
+  - title: CRYPTO22500
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto22500
+  hint: Negligible-value claims are recorded on their own page. This tag does not file one.
+- id: cashback
+  label: Cashback
+  effect: cashback
+  confirmed: false
+  note: A retail cashback is not income. The acquisition cost follows the cashback cost switch.
+  sources:
+  - title: Statement of Practice 4 (1997)
+    url: https://www.gov.uk/government/publications/statement-of-practice-4-1997/statement-of-practice-4-1997
+  - title: BIM100210
+    url: https://www.gov.uk/hmrc-internal-manuals/business-income-manual/bim100210
+  calculator_type: Cashback
+- id: fee_refund
+  label: Fee refund
+  effect: fee_refund
+  confirmed: false
+  note: A linked refund reduces that fee. An unlinked refund is booked at nil cost.
+  sources:
+  - title: TCGA 1992 section 38
+    url: https://www.legislation.gov.uk/ukpga/1992/12/section/38
+  - title: CRYPTO22150
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto22150
+- id: payment
+  label: Payment
+  effect: disposal
+  confirmed: false
+  note: Paying with tokens is a disposal.
+  sources:
+  - title: CRYPTO22100
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto22100
+  calculator_type: Spend
+- id: dust
+  label: Dust
+  effect: disposal
+  confirmed: false
+  note: A dust cleanup is a disposal of the token that was cleared.
+  sources:
+  - title: CRYPTO22100
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto22100
+  calculator_type: Spend
+- id: multi_trade
+  label: Multi trade
+  effect: disposal
+  confirmed: false
+  note: A multi-leg trade is a disposal of the tokens given up.
+  sources:
+  - title: CRYPTO22100
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto22100
+  calculator_type: Trade

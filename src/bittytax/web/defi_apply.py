@@ -11,8 +11,10 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
+from .convert import POSSIBLE_SPAM
 from .engine_run import run_tax_year
 from .rules import load_rules
+from .tag_set import rewrite_cells, settle
 from .taxyear import tax_year_containing
 
 _BANNER = "AWAITING TAX REVIEW"
@@ -37,29 +39,46 @@ _TYPE_FOR_EFFECT = {
 def tax_cells(row: Mapping[str, Any], forced: Optional[Mapping[str, Any]] = None) -> List[str]:
     """Cells for the calculator. The stored type is not changed here."""
     cells = list(row.get("cells") or [])
-    if not cells:
+    if not cells or row.get("deleted"):
+        return []
+    if row.get("spam_listed"):
+        cells[0] = POSSIBLE_SPAM
         return cells
     spec = forced if forced is not None else _spec(str(row.get("tag") or ""), _year(row))
     new_type = _type_for(row, spec)
     if new_type:
         cells[0] = new_type
-    return cells
+    return rewrite_cells(row, cells)
 
 
 def any_rewritten(rows: Sequence[Mapping[str, Any]]) -> bool:
+    kept: List[Mapping[str, Any]] = []
+    plain: List[List[str]] = []
+    revised: List[List[str]] = []
     for row in rows:
         cells = list(row.get("cells") or [])
-        if cells and tax_cells(row)[0] != cells[0]:
-            return True
-    return False
+        if not cells or row.get("deleted"):
+            continue
+        kept.append(row)
+        plain.append(list(cells))
+        revised.append(tax_cells(row))
+    return settle(kept, revised) != plain
 
 
 def tax_csv(rows: Sequence[Mapping[str, Any]], header: Sequence[str]) -> str:
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(list(header))
+    kept: List[Mapping[str, Any]] = []
+    revised: List[List[str]] = []
     for row in rows:
-        writer.writerow(tax_cells(row))
+        cells = tax_cells(row)
+        if not cells:
+            continue
+        kept.append(row)
+        revised.append(cells)
+    for cells in settle(kept, revised):
+        writer.writerow(cells)
     return buffer.getvalue()
 
 

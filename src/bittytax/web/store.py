@@ -40,20 +40,21 @@ from .import_inspect import (
     store_prints,
 )
 from .rules import defi_tags
+from .tx_store import apply_bundle, bundle, koinly_facts, row_extra, update_meta
 
 PAGE_SIZE = 50
 _SPECIAL = {NEEDS_REVIEW, POSSIBLE_SPAM, IGNORED}
 _VALUE_INDEX = {"buy_value": 3, "sell_value": 6, "fee_value": 9}
 
 
-class Desk:
+class Desk:  # pylint: disable=too-many-public-methods
     """One data directory: raw files, the derived ledger, and an append-only log."""
 
     def __init__(self, root: Path) -> None:
         self.root = root
         self.raw_dir = root / "raw"
         self._lock = threading.Lock()
-        self._row_cache: Optional[Tuple[Tuple[int, int, int], List[Dict[str, Any]]]] = None
+        self._row_cache: Optional[Tuple[Tuple[int, ...], List[Dict[str, Any]]]] = None
         self.root.mkdir(parents=True, exist_ok=True)
         self.raw_dir.mkdir(parents=True, exist_ok=True)
 
@@ -191,6 +192,12 @@ class Desk:
     def all_rows(self) -> List[Dict[str, Any]]:
         return self._effective_rows()
 
+    def refresh_records(self) -> None:
+        """Rewrite the derived CSV after a soft delete, restore, or overlay change."""
+        with self._lock:
+            self._row_cache = None
+            self._write_effective_unlocked()
+
     def transactions(
         self,
         filters: Optional[Mapping[str, str]] = None,
@@ -225,10 +232,7 @@ class Desk:
                 row["allowed_types"] = allowed_types()
                 catalog = defi_tags()
                 row["defi_tags"] = catalog
-                chosen = ""
-                if row["log"]:
-                    chosen = str(row["log"][-1].get("tag") or "")
-                row["tag"] = chosen
+                chosen = str(row.get("tag") or "")
                 row["tag_note"] = next(
                     (item["note"] for item in catalog if item["id"] == chosen), ""
                 )
@@ -334,6 +338,74 @@ class Desk:
                 os.fsync(handle.fileno())
             self._write_effective_unlocked()
         return len(lines)
+
+    def append_manual(self, groups: Sequence[Sequence[str]], who: str = "local") -> List[str]:
+        """Append rows typed in on the desk. The raw upload directory is not used."""
+        if not groups:
+            raise DeskError("Enter a transaction.")
+        import_id = f"manual-{_new_id()}"
+        with self._lock:
+            ledger = _read_json(self.root / "ledger.json", {"rows": []})
+            start = len(ledger["rows"])
+            ids = []
+            for offset, cells in enumerate(groups):
+                if len(cells) != 13:
+                    raise DeskError("A manual row is incomplete.")
+                row_id = f"{import_id}:{start + offset:04d}"
+                ledger["rows"].append(
+                    {"id": row_id, "import_id": import_id, "cells": [str(cell) for cell in cells]}
+                )
+                ids.append(row_id)
+            manifest = _read_json(self.root / "imports.json", {"imports": []})
+            dates = sorted(str(cells[11])[:10] for cells in groups if len(cells) > 11 and cells[11])
+            manifest["imports"].append(
+                {
+                    "id": import_id,
+                    "filename": "Manual entry",
+                    "sha256": "",
+                    "bytes": 0,
+                    "row_count": len(groups),
+                    "converted_rows": len(groups),
+                    "unmapped_rows": 0,
+                    "format": "Manual",
+                    "date_min": dates[0] if dates else "",
+                    "date_max": dates[-1] if dates else "",
+                    "imported_at": _stamp(),
+                    "raw_path": "",
+                }
+            )
+            _write_json(self.root / "ledger.json", ledger)
+            _write_json(self.root / "imports.json", manifest)
+            self._row_cache = None
+            self._write_effective_unlocked()
+        for row_id in ids:
+            update_meta(self.root, row_id, {"manual": "yes"})
+        append_event(
+            self.root,
+            "manual-add",
+            who,
+            "Added a manual transaction.",
+            {"import_id": import_id, "rows": str(len(ids))},
+        )
+        return ids
+
+    def patch_note(self, row_id: str, note: str) -> None:
+        """Replace the note on the derived ledger. The uploaded file is not edited."""
+        with self._lock:
+            ledger = _read_json(self.root / "ledger.json", {"rows": []})
+            found = False
+            for stored in ledger["rows"]:
+                if stored["id"] != row_id:
+                    continue
+                cells = list(stored["cells"])
+                cells[12] = note
+                stored["cells"] = cells
+                found = True
+            if not found:
+                raise DeskError("That transaction is not in the ledger.")
+            _write_json(self.root / "ledger.json", ledger)
+            self._row_cache = None
+            self._write_effective_unlocked()
 
     def change_log(self) -> List[Dict[str, str]]:
         path = self.root / "reclassifications.jsonl"
@@ -492,6 +564,9 @@ class Desk:
     def _build_rows(self) -> List[Dict[str, Any]]:
         changes = _latest_changes(self.change_log())
         fills = _latest_fills(self.price_fills())
+        overlay = bundle(self.root)
+        facts = self._import_facts()
+        sources = self._import_sources()
         rows = []
         for stored in self._ledger_rows():
             cells = list(stored["cells"])
@@ -505,10 +580,56 @@ class Desk:
                 index = _VALUE_INDEX.get(field)
                 if index is not None:
                     cells[index] = entry["value"]
+            fact = dict(facts.get(stored["id"]) or {})
+            fact["row_id"] = stored["id"]
+            names = list(sources.get(stored["import_id"], {}).get("names") or [])
+            if len(cells) > 10 and cells[10]:
+                names.append(str(cells[10]))
+            cells = apply_bundle(overlay, cells, names, fact)
             packed = _present(stored["id"], stored["import_id"], cells, changed)
-            packed["tag"] = tag
+            packed.update(row_extra(overlay, stored["id"], tag))
+            origin = sources.get(stored["import_id"], {})
+            packed["import_source"] = str(origin.get("filename") or "")
+            packed["import_type"] = str(origin.get("format") or "")
+            packed["import_date"] = str(origin.get("imported_at") or "")[:10]
+            if not packed["description"]:
+                packed["description"] = packed["note"]
+            if not packed["value_source"] and any(
+                packed[key] for key in ("buy_value", "sell_value", "fee_value")
+            ):
+                packed["value_source"] = "market"
             rows.append(packed)
         return rows
+
+    def _import_facts(self) -> Dict[str, Dict[str, str]]:
+        found: Dict[str, Dict[str, str]] = {}
+        manifest = {item["id"]: item for item in self.imports()}
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        for stored in self._ledger_rows():
+            grouped.setdefault(str(stored["import_id"]), []).append(stored)
+        for import_id, stored_rows in grouped.items():
+            entry = manifest.get(import_id) or {}
+            raw = self.root / str(entry.get("raw_path") or "")
+            if not raw.is_file():
+                continue
+            parsed = koinly_facts(raw.read_bytes())
+            if len(parsed) != len(stored_rows):
+                continue
+            for stored, fact in zip(stored_rows, parsed):
+                found[str(stored["id"])] = fact
+        return found
+
+    def _import_sources(self) -> Dict[str, Dict[str, Any]]:
+        found = {}
+        for item in self.imports():
+            names = [str(item.get("format") or ""), str(item.get("filename") or "")]
+            found[str(item["id"])] = {
+                "names": [name for name in names if name],
+                "filename": str(item.get("filename") or ""),
+                "format": str(item.get("format") or ""),
+                "imported_at": str(item.get("imported_at") or ""),
+            }
+        return found
 
     def _ledger_rows(self) -> List[Dict[str, Any]]:
         return list(_read_json(self.root / "ledger.json", {"rows": []})["rows"])
@@ -519,6 +640,8 @@ class Desk:
         writer = csv.writer(buffer, lineterminator="\n")
         writer.writerow(header)
         for row in self._effective_rows():
+            if row.get("deleted"):
+                continue
             writer.writerow(row["cells"])
         text = buffer.getvalue()
         current = (
@@ -836,12 +959,18 @@ def _public_report(report: Mapping[str, Any]) -> Dict[str, Any]:
     return {key: report.get(key) for key in keys}
 
 
-def _source_stamp(root: Path) -> Tuple[int, int, int]:
-    return (
-        _file_stamp(root / "ledger.json"),
-        _file_stamp(root / "reclassifications.jsonl"),
-        _file_stamp(root / "price-fills.jsonl"),
+def _source_stamp(root: Path) -> Tuple[int, ...]:
+    names = (
+        "ledger.json",
+        "reclassifications.jsonl",
+        "price-fills.jsonl",
+        "tx-meta.json",
+        "value-overrides.jsonl",
+        "asset-renames.json",
+        "spam-tokens.json",
+        "custom-prices.json",
     )
+    return tuple(_file_stamp(root / name) for name in names)
 
 
 def _file_stamp(path: Path) -> int:

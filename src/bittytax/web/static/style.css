@@ -933,3 +933,14 @@ body.is-print main { max-width: 42rem; margin: 0 auto; }
   main { max-width: none; }
   body.is-print footer { display: block !important; }
 }
+
+.tx-day {
+  margin: 0;
+  padding: 0.55rem 0.9rem;
+  background: var(--track);
+  font-size: 0.85rem;
+}
+
+.mark-m {
+  font-weight: 700;
+}

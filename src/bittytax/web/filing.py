@@ -50,6 +50,7 @@ CATEGORIES: Tuple[Tuple[str, str], ...] = (
     ("loss_deadline", "Loss deadlines"),
     ("awaiting_decision", "Awaiting decision"),
     ("accepted_gap", "Accepted gaps"),
+    ("tx_warning", "Transaction warnings"),
 )
 _ORDER = {key: index for index, (key, _label) in enumerate(CATEGORIES)}
 _CLASS = {
@@ -114,6 +115,7 @@ def readiness(
     found.extend(loss_items(loss_rows, year))
     found.extend(decision_items(negligible_claims(desk.root), _lots(desk), year))
     found.extend(accepted_gap_items(_spec_boxes(sa108), gaps(desk.root), year))
+    found.extend(transaction_warning_items(desk, year))
     return summarise(found, year, band)
 
 
@@ -388,7 +390,8 @@ def summarise(items: Sequence[Mapping[str, str]], year: int, threshold: Decimal)
     )
     tally = {key: 0 for key, _label in CATEGORIES}
     for item in ordered:
-        tally[item["category"]] = tally.get(item["category"], 0) + 1
+        weight = int(item.get("weight") or 1)
+        tally[item["category"]] = tally.get(item["category"], 0) + weight
     counts = [{"key": key, "label": label, "count": tally[key]} for key, label in CATEGORIES]
     blocking = sum(1 for item in ordered if item.get("blocking") == "yes")
     gap_count = sum(1 for item in ordered if item.get("kind") == "accepted gap")
@@ -612,9 +615,30 @@ def _flagged(value: object) -> bool:
     return value in {True, "true", "yes"}
 
 
-def _item(category: str, name: str, detail: str, href: str, blocking: bool) -> Dict[str, str]:
+def transaction_warning_items(desk: Any, year: int) -> List[Dict[str, str]]:
+    """A count of transaction warnings for this tax year. Dust is already hidden."""
+    from .tx_workspace import warning_total  # pylint: disable=import-outside-toplevel
+
+    count = warning_total(desk, year)
+    if not count:
+        return []
+    return [
+        _item(
+            "tx_warning",
+            "Transaction warnings",
+            f"{count} rows still have a warning.",
+            "/transactions?warning=any",
+            True,
+            count,
+        )
+    ]
+
+
+def _item(
+    category: str, name: str, detail: str, href: str, blocking: bool, weight: int = 1
+) -> Dict[str, str]:
     label = dict(CATEGORIES)[category]
-    return {
+    packed = {
         "category": category,
         "category_label": label,
         "name": name,
@@ -623,6 +647,9 @@ def _item(category: str, name: str, detail: str, href: str, blocking: bool) -> D
         "blocking": "yes" if blocking else "no",
         "kind": "open" if blocking else "accepted gap",
     }
+    if weight != 1:
+        packed["weight"] = str(weight)
+    return packed
 
 
 def _status(blocking: int, gap_count: int) -> str:
