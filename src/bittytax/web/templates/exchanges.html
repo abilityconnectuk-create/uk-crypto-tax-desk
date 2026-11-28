@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block body %}
+    <div class="page-head">
+        <div>
+            <h1>Exchange vs Koinly</h1>
+            <p class="lede">
+                {{ view.exchange }} for this tax year, compared with the Koinly rows already imported.
+                A match allows two minutes and amounts within 0.01 percent.
+                Nothing is written to Koinly.
+                An exchange row enters the tax report only after you accept it on Review.
+            </p>
+        </div>
+    </div>
+    {% if again %}
+        <p class="note">This file was already imported. No rows were added.</p>
+    {% endif %}
+    <form method="get" action="/exchanges" class="filters">
+        <input type="hidden" name="tax_year" value="{{ tax_year }}">
+        <label for="exchange">Exchange</label>
+        <select id="exchange" name="exchange" class="js-auto">
+            {% for item in view.exchanges %}
+                <option value="{{ item.name }}"
+                        {% if item.name == view.exchange %}selected{% endif %}>
+                    {{ item.name }} ({{ item.count }})
+                </option>
+            {% endfor %}
+        </select>
+        <button type="submit">Show</button>
+    </form>
+    <p>
+        {% if view.matched == 1 %}
+            1 row matches Koinly.
+        {% else %}
+            {{ view.matched }} rows match Koinly.
+        {% endif %}
+        {% if view.accepted == 1 %}
+            1 row has been added to the tax report.
+        {% else %}
+            {{ view.accepted }} rows have been added to the tax report.
+        {% endif %}
+    </p>
+    {% if view.rows %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Kind</th>
+                    <th>When</th>
+                    <th>Detail</th>
+                    <th>Page</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in view.rows %}
+                    <tr>
+                        <td>{{ row.title }}</td>
+                        <td>{{ row.timestamp }}</td>
+                        <td>{{ row.detail }}</td>
+                        <td>
+                            <a href="{{ row.href }}">Open</a>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>No differences for this exchange in this tax year.</p>
+    {% endif %}
+    <h2>Files for {{ view.exchange }}</h2>
+    {% if view.imports %}
+        <table>
+            <thead>
+                <tr>
+                    <th>File</th>
+                    <th>Format</th>
+                    <th>Rows</th>
+                    <th>Skipped</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in view.imports %}
+                    <tr>
+                        <td>{{ item.filename }}</td>
+                        <td>{{ item.format }}</td>
+                        <td>{{ item.rows }}</td>
+                        <td>{{ item.skipped }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>No exchange file has been imported for {{ view.exchange }}.</p>
+    {% endif %}
+    <h2>Where to download</h2>
+    <p>Import the CSV itself. Do not open it in a spreadsheet and save it again. A zip from the exchange should be unpacked first.</p>
+    <h3>Coinbase</h3>
+    <p>
+        On the Coinbase website, open your profile, then Settings, then Accounts, then Statements.
+        Generate a custom statement for all assets and all transaction types, and choose CSV.
+        Coinbase emails the file. Any filename is fine when the header row starts with
+        <code>ID, Timestamp, Transaction Type</code>.
+    </p>
+    <h3>KuCoin spot trades</h3>
+    <p>
+        On the KuCoin website, open Orders, then Export Data.
+        Choose Spot Orders, then Filled Orders, and CSV.
+        Leave order splitting off, so the same fill is not imported twice.
+        The file is named like <code>Spot Orders_Filled Orders</code>.
+        One export covers at most one year.
+    </p>
+    <h3>KuCoin deposits and withdrawals</h3>
+    <p>
+        In the same Export Data screen, choose Deposit/Withdrawal History, then Deposit History and Withdrawal Record.
+        Import each CSV on its own.
+        The files are named like <code>Deposit_Withdrawal History_Deposit History</code>
+        and <code>Deposit_Withdrawal History_Withdrawal Record</code>.
+        Only a row whose status is SUCCESS is mapped. Any other status is skipped.
+    </p>
+    <h3>Revolut X</h3>
+    <p>
+        In the Revolut app, open Crypto, then More, then Documents, then Statement.
+        Choose Excel. The download is a CSV. Choose All time.
+        Revolut X trades are included in that statement, so there is no separate Revolut X file.
+        The header row is <code>Symbol, Type, Quantity, Price, Value, Fees, Date</code>.
+    </p>
+{% endblock %}

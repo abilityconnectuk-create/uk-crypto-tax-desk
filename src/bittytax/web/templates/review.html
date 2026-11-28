@@ -1,7 +1,12 @@
 {% extends "base.html" %}
 {% block body %}
     <h1>Review</h1>
-    <p class="lede">Unmatched transfers, spam and unmapped tags come from the conversion tool's reconciliation. Missing cost basis comes from the calculator for {{ review.label }}.</p>
+    <p class="lede">
+        Unmatched transfers, spam and unmapped tags come from the conversion tool's reconciliation.
+        Missing cost basis comes from the calculator for {{ review.label }}.
+        Exchange rows that Koinly does not have, and rows whose type was not recognised, wait here.
+        Accepting one adds it to the tax report. Nothing is written to Koinly.
+    </p>
     <form method="get" action="/review">
         <label for="tax_year">Tax year for missing cost</label>
         <select id="tax_year" name="tax_year">
@@ -60,13 +65,52 @@
             </thead>
             <tbody>
                 {% for row in review.queue %}
-                    <tr>
+                    <tr {% if row.id %}id="row-{{ row.id }}"{% endif %}>
                         <td>{{ row.timestamp }}</td>
                         <td>{{ row.asset }}</td>
                         <td>{{ row.quantity }}</td>
                         <td>{{ row.wallet }}</td>
                         <td>{{ row.disposition }}</td>
-                        <td>{{ row.description }}</td>
+                        <td>
+                            {{ row.description }}
+                            {% if row.kind == "exchange" %}
+                                <form method="post" action="/review/exchange">
+                                    <input type="hidden" name="csrf" value="{{ csrf }}">
+                                    <input type="hidden" name="row_id" value="{{ row.id }}">
+                                    <input type="hidden" name="tax_year" value="{{ tax_year }}">
+                                    {% if row.needs_type == "yes" %}
+                                        <label>
+                                            Type
+                                            <select name="type" required>
+                                                <option value="">Choose</option>
+                                                {% for name in types %}
+                                                    <option value="{{ name }}">{{ name }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </label>
+                                        <label>
+                                            Received asset
+                                            <input name="buy_asset" value="{{ row.asset }}">
+                                        </label>
+                                        <label>
+                                            Received quantity
+                                            <input name="buy_quantity" value="{{ row.quantity }}">
+                                        </label>
+                                        <label>
+                                            Sent asset
+                                            <input name="sell_asset">
+                                        </label>
+                                        <label>
+                                            Sent quantity
+                                            <input name="sell_quantity">
+                                        </label>
+                                        <button type="submit">Accept with this type</button>
+                                    {% else %}
+                                        <button type="submit">Add to the tax report</button>
+                                    {% endif %}
+                                </form>
+                            {% endif %}
+                        </td>
                     </tr>
                 {% endfor %}
             </tbody>
