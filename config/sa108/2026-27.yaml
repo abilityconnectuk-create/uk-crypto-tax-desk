@@ -24,6 +24,12 @@ boxes:
     engine_field: disposals
     accountant_review: false
     confirmed: false
+    note: >
+      A disposal count is the number of capital-gains disposals after
+      same-day matching, then the next 30 days, then the section 104 pool.
+      A transfer between the person's own wallets is not counted. The desk
+      count is shown beside the count from an imported Koinly file.
+      This wording is awaiting tax review.
   - box: "13.2"
     key: proceeds
     label: Disposal proceeds

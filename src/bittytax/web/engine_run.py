@@ -27,6 +27,7 @@ from ..holdings import Holdings
 from ..price.exceptions import DataSourceError
 from ..report import ReportLog
 from ..tax import CalculateCapitalGains, CalculateIncome, CapitalGainsReportEstimate
+from .disposal_match import matching_rule
 from .errors import DeskError
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -221,12 +222,14 @@ def _disposals(gains: CalculateCapitalGains) -> List[Dict[str, str]]:
     rows = []
     for asset in sorted(gains.assets):
         for event in gains.assets[asset]:
+            kind = event.format_disposal()
             rows.append(
                 {
                     "asset": str(event.asset),
                     "date": ReportLog.format_date(event.date),
                     "date_iso": event.date.isoformat(),
-                    "disposal_type": event.format_disposal(),
+                    "disposal_type": kind,
+                    "matching_rule": matching_rule(kind),
                     "quantity": _qty(event.quantity),
                     "cost": _pence(event.cost),
                     "fees": _pence(event.fees),

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block body %}
+    <div class="page-head">
+        <div>
+            <h1>Income</h1>
+            <p class="lede">
+                Staking, DeFi returns and income airdrops for the main return.
+                This schedule is kept apart from SA108. The trading allowance is a check and is not deducted.
+            </p>
+        </div>
+    </div>
+    <p class="banner">AWAITING TAX REVIEW</p>
+    {% if view.error %}<p class="warn">{{ view.error }}</p>{% endif %}
+    <section class="card pad">
+        <p>{{ view.schedule.note }}</p>
+        <p class="warn">{{ view.schedule.open_question }}</p>
+        <p>
+            Schedule total {{ view.schedule.total | gbp }}.
+            Trading allowance check {{ view.schedule.allowance | gbp }}.
+            {% if view.schedule.above_allowance %}
+                The total is above that check.
+            {% else %}
+                The total is within that check.
+            {% endif %}
+            The allowance is not deducted.
+        </p>
+    </section>
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Asset</th>
+                <th>Category</th>
+                <th>Income</th>
+                <th>Token cost</th>
+                <th>Open question</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in view.schedule.rows %}
+                <tr>
+                    <td>{{ row.date }}</td>
+                    <td>{{ row.asset }}</td>
+                    <td>{{ row.category }}</td>
+                    <td>{{ row.amount | gbp }}</td>
+                    <td>{{ row.token_cost | gbp }}</td>
+                    <td>{{ row.open_question }}</td>
+                </tr>
+            {% else %}
+                <tr>
+                    <td colspan="6">No staking, DeFi return or income airdrop in this year.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% endblock %}

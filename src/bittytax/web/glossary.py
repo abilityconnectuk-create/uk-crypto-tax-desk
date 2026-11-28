@@ -32,7 +32,8 @@ GLOSSARY: Dict[str, Dict[str, str]] = {
         "term": "30-day rule",
         "text": (
             "The 30-day rule can match a disposal with an acquisition of the same "
-            "asset in the following 30 days. This is a plain description, not advice."
+            "asset in the following 30 days, including a date after 5 April. "
+            "This is a plain description, not advice."
         ),
     },
     "sa108": {

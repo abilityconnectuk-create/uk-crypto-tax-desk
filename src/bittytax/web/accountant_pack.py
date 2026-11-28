@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 from .events import read_events
 from .losses import for_year
 from .pack import pack_context, pack_lines
+from .pack_sections import extra_files
 from .sa108 import sa108_view
 
 _README = """\
@@ -22,6 +23,16 @@ AWAITING TAX REVIEW applies to every figure that depends on a rule file.
 report.html and report.pdf are the same narrative report.
 disposals.csv, income.csv, holdings.csv and transactions.csv are the rows behind it.
 sa108.csv is the SA108 boxes, including boxes 45 and 47. They are not confirmed.
+cover.txt is the SA108 cover for boxes 13.1 to 13.8 and the inputs for boxes 45, 47 and 51.
+method-statement.txt records valuation, the pools, each DeFi rule and futures.
+disposal-schedule.csv shows the matching rule on each disposal.
+pool-snapshots.csv is the section 104 pool at the start and end of the year.
+income-schedule.csv is the income schedule for the main return, kept apart from SA108.
+koinly-reconciliation.csv compares an imported Koinly file and names each difference.
+missing-cost.csv lists disposals with no cost basis. Worth is not written in as the cost.
+known-gaps.csv is the unmatched-transfer queue and the known-gaps list.
+open-questions.txt lists points an accountant still has to decide.
+box-53-note.txt is the estimates and valuations note. The desk does not set the flag.
 accountant-review.txt lists items the rule file marks for an accountant.
 awaiting-tax-review.txt repeats the banner and the unconfirmed boxes.
 health.csv is the data-health list.
@@ -33,6 +44,7 @@ def build_zip(desk: Any, tax_year: int) -> bytes:
     context = pack_context(desk, tax_year)
     losses = for_year(desk, tax_year)
     sa108 = sa108_view(context["report"], tax_year, losses)
+    context["losses"] = losses
     lines = pack_lines(context)
     files: Dict[str, Any] = {
         "README.txt": _README,
@@ -48,6 +60,7 @@ def build_zip(desk: Any, tax_year: int) -> bytes:
         "health.csv": _rows((context.get("health") or {}).get("issues") or []),
         "audit.txt": _audit(desk.root),
     }
+    files.update(extra_files(desk, tax_year, context))
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name, payload in files.items():

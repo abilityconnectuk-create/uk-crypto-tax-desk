@@ -323,6 +323,7 @@
                     <th>Asset</th>
                     <th>Date</th>
                     <th>Disposal type</th>
+                    <th>Matching rule</th>
                     <th>Quantity</th>
                     <th>Cost</th>
                     <th>Fees</th>
@@ -336,6 +337,7 @@
                         <td>{{ row.asset }}</td>
                         <td>{{ row.date }}</td>
                         <td>{{ row.disposal_type }}</td>
+                        <td>{{ row.matching_rule }}</td>
                         <td>{{ row.quantity }}</td>
                         <td>{{ row.cost | gbp }}</td>
                         <td>{{ row.fees | gbp }}</td>
@@ -344,7 +346,7 @@
                     </tr>
                 {% else %}
                     <tr>
-                        <td colspan="8">No disposals in this year.</td>
+                        <td colspan="9">No disposals in this year.</td>
                     </tr>
                 {% endfor %}
             </tbody>

@@ -93,6 +93,35 @@
                         {{ ui.icon("report") }}
                         <span class="nav-label">Losses</span>
                     </a>
+                    <a href="/income"
+                       {% if section == "income" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("report") }}
+                        <span class="nav-label">Income</span>
+                    </a>
+                    <a href="/futures"
+                       {% if section == "futures" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("report") }}
+                        <span class="nav-label">Futures</span>
+                    </a>
+                    <a href="/missing-cost"
+                       {% if section == "missing-cost" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("health") }}
+                        <span class="nav-label">Missing cost</span>
+                    </a>
+                    <a href="/queues"
+                       {% if section == "queues" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("list") }}
+                        <span class="nav-label">Queues</span>
+                    </a>
+                    <a href="/spam" {% if section == "spam" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("health") }}
+                        <span class="nav-label">Spam filter</span>
+                    </a>
+                    <a href="/allocations"
+                       {% if section == "allocations" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("list") }}
+                        <span class="nav-label">Allocations</span>
+                    </a>
                     <a href="/defi" {% if section == "defi" %}aria-current="page"{% endif %}>
                         {{ ui.icon("report") }}
                         <span class="nav-label">DeFi</span>

@@ -235,3 +235,48 @@ defi:
       sources:
         - title: CRYPTO23000
           url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto23000
+desk_review:
+  label: awaiting tax review
+  confirmed: false
+  note: >
+    These checks are recorded for the accountant. None of them is confirmed,
+    and none of them is a filing position.
+  sterling:
+    label: awaiting tax review
+    confirmed: false
+    manual: CRYPTO23000
+    method: >
+      Value each event in GBP at the time it happens. Store the price and
+      the foreign-exchange source. Do not convert a USD total at one year-end rate.
+  matching:
+    label: awaiting tax review
+    confirmed: false
+    manual: CRYPTO22200
+    order:
+      - same day
+      - next 30 days
+      - section 104 pool
+    note: The 30-day window crosses 5 April into the next tax year.
+  pooling:
+    label: awaiting tax review
+    confirmed: false
+    manual: CRYPTO22200
+    note: >
+      Each asset has its own section 104 pool. USDT, USDC, USDF and RLUSD
+      are not merged.
+  fees:
+    label: awaiting tax review
+    confirmed: false
+    note: >
+      An acquisition fee is added to cost. A disposal fee reduces proceeds.
+      Gas paid in a token is a disposal of that token on its own pool.
+  futures:
+    label: awaiting tax review
+    confirmed: false
+    note: >
+      Futures and perpetuals are reported separately. Where they sit on the
+      return is an open question.
+  negligible_value:
+    label: awaiting tax review
+    confirmed: false
+    note: A negligible-value claim is accountant-only. The desk does not post a loss.
