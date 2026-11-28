@@ -150,8 +150,8 @@ def _create_archive(folder: Path, stamp: str, payload: bytes) -> Path:
 
 
 def _write_private(path: Path, payload: bytes) -> None:
-    """Create a new file at mode 0600. ``write_bytes`` then ``chmod`` stays open on Windows."""
-    descriptor = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    """Create a new file at mode 0600. Binary mode keeps every byte on Windows."""
+    descriptor = _open_binary(path)
     try:
         view = memoryview(payload)
         while view:
@@ -164,6 +164,12 @@ def _write_private(path: Path, payload: bytes) -> None:
     os.chmod(path, 0o600)
 
 
+def _open_binary(path: Path) -> int:
+    """Open a new file for raw bytes. Windows text mode would rewrite newline bytes."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    return os.open(str(path), flags, 0o600)
+
+
 def _key(root: Path) -> bytes:
     env = os.environ.get("BITTYTAX_DESK_PASSWORD", "").strip()
     if env:
@@ -172,7 +178,7 @@ def _key(root: Path) -> bytes:
         )
     path = root / "backup.key"
     if not path.is_file():
-        descriptor = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        descriptor = _open_binary(path)
         try:
             os.write(descriptor, os.urandom(32))
         finally:

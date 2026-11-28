@@ -44,6 +44,15 @@ def _assert_owner_only(path: Path) -> None:
     assert os.stat(path).st_mode & 0o777 == 0o600
 
 
+def test_restore_keeps_newline_bytes(tmp_path: Path) -> None:
+    original = b"a\nb\r\nc\n" * 40
+    (tmp_path / "note.txt").write_bytes(original)
+    path = backup_now(tmp_path, "test")
+    (tmp_path / "note.txt").write_text("changed\n", encoding="utf-8")
+    restore_backup(tmp_path, path.name)
+    assert (tmp_path / "note.txt").read_bytes() == original
+
+
 def test_retention_and_a_second_daily_start_do_not_pile_up(tmp_path: Path) -> None:
     save_retention(tmp_path, "1")
     backup_now(tmp_path, "one")
