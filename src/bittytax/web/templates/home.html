@@ -1,7 +1,53 @@
 {% extends "base.html" %}
 {% block body %}
     <h1>Local tax desk</h1>
-    <p class="lede">Imports stay in the data directory on this computer. Reports are calculated by BittyTax. Nothing is sent to a remote service.</p>
+    <p class="lede">Imports stay in the data directory on this computer. Reports are calculated by BittyTax on this computer.</p>
+    <p class="banner">{{ board.banner }}</p>
+    <h2>This tax year, {{ board.label }}</h2>
+    <ul class="stats">
+        <li><strong>{{ board.realised|gbp }}</strong> realised gain so far</li>
+        <li><strong>{{ board.allowance|gbp }}</strong> annual exempt amount</li>
+        <li><strong>{{ board.allowance_used|gbp }}</strong> of that amount used</li>
+        <li><strong>{{ board.allowance_remaining|gbp }}</strong> remaining</li>
+    </ul>
+    <p>The annual exempt amount is shown here. It is not deducted from the reported gains. {{ board.losses_carried }}</p>
+    {% if board.note %}<p class="warn">{{ board.note }}</p>{% endif %}
+    {% if board.holdings %}
+        <h2>Holdings</h2>
+        <div class="chart">
+            {% for row in board.holdings %}
+                <p class="bar">
+                    <span>{{ row.asset }}</span>
+                    <svg viewBox="0 0 100 8" width="220" height="12" role="img">
+                        <title>{{ row.asset }} cost {{ row.cost|gbp }}</title>
+                        <rect width="{{ row.bar }}" height="8"></rect>
+                    </svg>
+                </p>
+            {% endfor %}
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Asset</th>
+                    <th>Quantity</th>
+                    <th>Cost</th>
+                    <th>Value</th>
+                    <th>Unrealised</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in board.holdings %}
+                    <tr>
+                        <td>{{ row.asset }}</td>
+                        <td>{{ row.quantity }}</td>
+                        <td>{{ row.cost|gbp }}</td>
+                        <td>{{ row.value|gbp }}</td>
+                        <td>{{ row.unrealised|gbp }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
     <ul class="stats">
         <li><strong>{{ counts.transactions }}</strong> transactions</li>
         <li><strong>{{ counts.imports }}</strong> imports</li>

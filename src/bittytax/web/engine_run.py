@@ -23,6 +23,7 @@ from ..bittytax import _do_each_tax_year, _do_import, _do_integrity_check, _do_t
 from ..bt_types import TaxRules, Year
 from ..config import config
 from ..exceptions import ImportFailureError
+from ..holdings import Holdings
 from ..price.exceptions import DataSourceError
 from ..report import ReportLog
 from ..tax import CalculateCapitalGains, CalculateIncome, CapitalGainsReportEstimate
@@ -105,7 +106,9 @@ def _run(csv_path: str, tax_year: int) -> Dict[str, Any]:
     integrity_ok = _do_integrity_check(audit, tax.holdings)
     _do_each_tax_year(tax, Year(tax_year), False)
     packed = tax.tax_report[Year(tax_year)]
-    return _pack(tax_year, integrity_ok, payload, packed["CapitalGains"], packed["Income"])
+    return _pack(
+        tax_year, integrity_ok, payload, packed["CapitalGains"], packed["Income"], tax.holdings
+    )
 
 
 def _pack(
@@ -114,6 +117,7 @@ def _pack(
     payload: Mapping[str, Any],
     gains: CalculateCapitalGains,
     income: CalculateIncome,
+    holdings: Mapping[Any, Holdings],
 ) -> Dict[str, Any]:
     start = config.get_tax_year_start(tax_year)
     end = config.get_tax_year_end(tax_year)
@@ -143,7 +147,25 @@ def _pack(
         },
         "missing_cost": list(payload.get("missing_cost_rows", [])),
         "snapshot_year": dict(years.get(str(tax_year), {})),
+        "holdings": _pool_rows(holdings),
     }
+
+
+def _pool_rows(holdings: Mapping[Any, Holdings]) -> List[Dict[str, str]]:
+    """Section 104 pools after the import. No live price is requested."""
+    rows = []
+    for asset in sorted(holdings, key=str):
+        holding = holdings[asset]
+        if holding.quantity == 0:
+            continue
+        rows.append(
+            {
+                "asset": str(holding.asset),
+                "quantity": _qty(holding.quantity),
+                "cost": _pence(holding.cost + holding.fees),
+            }
+        )
+    return rows
 
 
 def _summary(gains: CalculateCapitalGains) -> Dict[str, Any]:

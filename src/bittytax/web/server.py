@@ -30,6 +30,7 @@ from .auth import (
     safe_next,
 )
 from .config_view import config_snapshot
+from .dashboard import dashboard
 from .engine_run import supported_years
 from .errors import DeskError
 from .identity import LOOPBACK, actor_for, trusted_tailscale_user
@@ -234,7 +235,12 @@ def _handler_for(  # pylint: disable=too-many-statements
 
         def _home(self) -> None:
             self._page(
-                "home.html", "Desk", section="home", counts=desk.counts(), imports=desk.imports()
+                "home.html",
+                "Desk",
+                section="home",
+                counts=desk.counts(),
+                imports=desk.imports(),
+                board=dashboard(desk),
             )
 
         def _import_form(self) -> None:

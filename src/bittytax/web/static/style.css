@@ -120,6 +120,10 @@ tr.diff td { background: var(--warn-bg); }
   margin: 1rem 0;
 }
 .chart { margin: 1rem 0; overflow-x: auto; }
+.bar { display: flex; gap: 0.75rem; align-items: center; margin: 0.25rem 0; }
+.bar span { min-width: 4rem; }
+.bar svg { background: var(--line); }
+.bar rect { fill: var(--green); }
 pre {
   white-space: pre-wrap;
   background: var(--card);

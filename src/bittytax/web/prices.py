@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from ..bt_types import AssetSymbol, Timestamp
 from ..config import config
@@ -104,6 +104,22 @@ def lookup_gbp(asset: str, day: str) -> Optional[Dict[str, str]]:
     if record.price_ccy is None:
         return None
     return {"price": f"{record.price_ccy}", "source": str(record.data_source or "price")}
+
+
+def latest_unit_prices(desk: Desk) -> Dict[str, str]:
+    """Newest cached unit price for each asset. Nothing is fetched."""
+    best: Dict[str, Tuple[str, str]] = {}
+    for key, entry in _read_cache(desk).items():
+        if "|" not in key or not isinstance(entry, dict):
+            continue
+        asset, day = key.split("|", 1)
+        price = str(entry.get("price", "") or "")
+        if not price:
+            continue
+        current = best.get(asset)
+        if current is None or day > current[0]:
+            best[asset] = (day, price)
+    return {asset: price for asset, (day, price) in best.items()}
 
 
 def load_misses(desk: Desk) -> List[Dict[str, str]]:
