@@ -51,11 +51,21 @@ def pack_lines(context: Mapping[str, Any]) -> List[str]:
         lines.append(f"Annual exempt amount: {sa108['allowance']['value']}")
     else:
         lines.append("No SA108 mapping for this year.")
+    if summary.get("split_date"):
+        lines.append("Box 51 inputs")
+        lines.append(
+            f"Gains before {summary.get('split_date_label', '')}: {summary.get('gain_before', '')}"
+        )
+        lines.append(
+            "Gains on or after "
+            f"{summary.get('split_date_label', '')}: {summary.get('gain_after', '')}"
+        )
     lines.append("Disposals")
     for row in report.get("disposals", []):
         lines.append(
             f"{row.get('date', '')} {row.get('asset', '')} "
-            f"qty {row.get('quantity', '')} gain {row.get('gain', '')}"
+            f"qty {row.get('quantity', '')} gain {row.get('gain', '')} "
+            f"rule {row.get('matching_rule', row.get('disposal_type', ''))}"
         )
     lines.append("Income")
     income = report.get("income") or {}

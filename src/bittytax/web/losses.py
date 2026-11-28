@@ -6,10 +6,10 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .dashboard import tax_year_containing
 from .errors import DeskError
@@ -65,9 +65,45 @@ def load_opening(root: Path) -> Dict[str, str]:
     return {"year": str(loaded.get("year", "")), "amount": str(loaded.get("amount", ""))}
 
 
-def schedule(desk: Any) -> List[Dict[str, str]]:
+def claim_deadline(ending_year: int) -> str:
+    """Four years after the end of the tax year. The end of a tax year is 5 April."""
+    return f"{ending_year + 4}-04-05"
+
+
+def deadline_warning(deadline: str, today: date) -> str:
+    """``past`` once the claim date has gone, ``near`` inside 90 days, otherwise blank."""
+    when = date.fromisoformat(deadline)
+    if today > when:
+        return "past"
+    if (when - today).days <= 90:
+        return "near"
+    return ""
+
+
+def save_claim(root: Path, year: str, status: str) -> None:
+    ending = _year(year)
+    if status not in {"unclaimed", "claimed"}:
+        raise DeskError("Choose claimed or unclaimed. The desk does not decide a claim.")
+    current = load_claims(root)
+    current[str(ending)] = status
+    _write_json(root / "loss-claims.json", current)
+
+
+def load_claims(root: Path) -> Dict[str, str]:
+    path = root / "loss-claims.json"
+    if not path.is_file():
+        return {}
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        return {}
+    return {str(key): str(value) for key, value in loaded.items()}
+
+
+def schedule(desk: Any, today: Optional[date] = None) -> List[Dict[str, str]]:
     """One row per tax year. Box 45 is brought-forward losses used. Box 47 is carried forward."""
     opening = load_opening(desk.root)
+    claims = load_claims(desk.root)
+    when = today or date.today()
     years = _years(desk, opening.get("year", ""))
     brought = Decimal(0)
     rows = []
@@ -75,15 +111,26 @@ def schedule(desk: Any) -> List[Dict[str, str]]:
         if str(year) == opening.get("year"):
             brought = _decimal(opening.get("amount"))
         figures = _year_figures(desk, year)
-        result = allocate(figures["gains"], figures["losses"], brought, _allowance(year))
+        raw_allowance = parameter(year, "annual_exempt_amount").strip()
+        allowance = _decimal(raw_allowance) if raw_allowance else Decimal(0)
+        result = allocate(figures["gains"], figures["losses"], brought, allowance)
+        deadline = claim_deadline(year)
+        gross = result["gross_losses"]
+        warning = deadline_warning(deadline, when) if gross > 0 else ""
+        shown_allowance = (
+            f"{result['allowance'].quantize(_PENCE)}" if raw_allowance else "not in the rule file"
+        )
         rows.append(
             {
                 "year": str(year),
                 "gains": f"{result['gains'].quantize(_PENCE)}",
-                "gross_losses": f"{result['gross_losses'].quantize(_PENCE)}",
+                "gross_losses": f"{gross.quantize(_PENCE)}",
                 "brought_used": f"{result['brought_used'].quantize(_PENCE)}",
                 "carried": f"{result['carried'].quantize(_PENCE)}",
-                "allowance": f"{result['allowance'].quantize(_PENCE)}",
+                "allowance": shown_allowance,
+                "claim_status": claims.get(str(year), "unclaimed"),
+                "deadline": deadline,
+                "warning": warning,
                 "banner": _BANNER,
             }
         )
@@ -107,10 +154,6 @@ def _year_figures(desk: Any, year: int) -> Dict[str, Decimal]:
         return {"gains": Decimal(0), "losses": Decimal(0)}
     summary = report.get("summary") or {}
     return {"gains": _decimal(summary.get("total_gain")), "losses": _decimal(summary.get("losses"))}
-
-
-def _allowance(year: int) -> Decimal:
-    return _decimal(parameter(year, "annual_exempt_amount"))
 
 
 def _years(desk: Any, opening_year: str) -> List[int]:
@@ -142,6 +185,16 @@ def _money(value: str) -> Decimal:
     if amount < 0:
         raise DeskError("Enter opening losses as a positive number.")
     return amount.quantize(_PENCE)
+
+
+def _write_json(path: Path, payload: Dict[str, str]) -> None:
+    text = json.dumps(payload, ensure_ascii=True, sort_keys=True) + "\n"
+    descriptor = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(descriptor, text.encode("utf-8"))
+    finally:
+        os.close(descriptor)
+    os.chmod(path, 0o600)
 
 
 def _decimal(value: object) -> Decimal:

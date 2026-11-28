@@ -22,6 +22,7 @@ import jinja2
 from ..report import ReportLog
 from . import DEFAULT_TAX_YEAR
 from .accountant_pack import build_zip
+from .allocation_desk import link_manually, mark_negligible
 from .auth import (
     DeskAuth,
     Session,
@@ -49,11 +50,13 @@ from .defi_apply import pending_preview
 from .engine_run import supported_years
 from .errors import DeskError
 from .events import append_event
+from .futures import save_toggle
 from .glossary import GLOSSARY
 from .identity import LOOPBACK, actor_for, trusted_tailscale_user
 from .import_inspect import find_problem, load_problems
-from .koinly_check import compare_year, load_uploads, store_uploads
-from .losses import for_year, save_opening, schedule
+from .koinly_check import store_uploads
+from .koinly_reconcile import save_tolerance
+from .losses import for_year, save_claim, save_opening, schedule
 from .matching import apply_auto_matches, decide, match_view, save_settings
 from .pack import pack_context, pack_lines, render_pdf
 from .planning import hypothetical, plan_view
@@ -67,6 +70,8 @@ from .present import (
     year_title,
 )
 from .prices import fetch_missing, load_misses, missing_slots
+from .queues import save_gap, save_transfer_note
+from .rule_versions import record
 from .rules import accountant_review_items, list_rule_years
 from .sa108 import sa108_view
 from .sources import detect_upload, parser_catalogue
@@ -78,8 +83,20 @@ from .sources_extra import (
     import_revolut_csv,
     import_solana,
 )
+from .spam_filter import drop_rows, restore_row
 from .store import Desk
 from .sync import import_ethereum, import_kraken, secrets_present
+from .tax_views import (
+    allocation_page,
+    futures_page,
+    income_page,
+    koinly_page,
+    match_lines,
+    missing_page,
+    queue_page,
+    spam_page,
+    valuation_rows,
+)
 from .updater import describe, repo_root, update_checkout
 from .user_rules import (
     apply_bulk,
@@ -279,6 +296,17 @@ def _handler_for(  # pylint: disable=too-many-statements
                 ("GET", "/report.csv"): lambda: self._report_csv(query),
                 ("GET", "/koinly"): lambda: self._koinly(query),
                 ("POST", "/koinly"): self._koinly_post,
+                ("POST", "/koinly/tolerance"): self._koinly_tolerance,
+                ("GET", "/income"): lambda: self._income(query),
+                ("GET", "/futures"): lambda: self._futures(query),
+                ("POST", "/futures"): self._futures_save,
+                ("GET", "/missing-cost"): lambda: self._missing(query),
+                ("GET", "/spam"): self._spam,
+                ("POST", "/spam"): self._spam_post,
+                ("GET", "/queues"): lambda: self._queues(query),
+                ("POST", "/queues"): self._queues_post,
+                ("GET", "/allocations"): self._allocations,
+                ("POST", "/allocations"): self._allocations_post,
                 ("GET", "/prices"): self._prices,
                 ("POST", "/prices/fetch"): self._prices_fetch,
                 ("GET", "/plan"): lambda: self._plan("", None, {}),
@@ -691,17 +719,13 @@ def _handler_for(  # pylint: disable=too-many-statements
 
         def _koinly(self, query: Mapping[str, List[str]]) -> None:
             year = _year(_field(query, "tax_year"))
-            summary, complete = load_uploads(desk.root, year)
-            comparison = (
-                compare_year(desk.report(year), summary, complete) if summary or complete else None
-            )
             self._page(
                 "koinly.html",
                 "Koinly",
                 section="koinly",
-                comparison=comparison,
                 years=supported_years(),
                 tax_year=year,
+                **koinly_page(desk, year),
             )
 
         def _koinly_post(self) -> None:
@@ -712,7 +736,125 @@ def _handler_for(  # pylint: disable=too-many-statements
             if not summary and not complete:
                 raise DeskError("Choose a Koinly summary or a complete tax report.")
             store_uploads(desk.root, year, summary, complete)
+            record(desk.root, self._actor(), "Imported a Koinly file for comparison.", "override")
             self._redirect(f"/koinly?tax_year={year}")
+
+        def _koinly_tolerance(self) -> None:
+            year = _year(self._req.form.get("tax_year", ""))
+            save_tolerance(desk.root, self._req.form.get("tolerance", ""))
+            record(
+                desk.root, self._actor(), "Saved the Koinly reconciliation tolerance.", "override"
+            )
+            self._redirect(f"/koinly?tax_year={year}")
+
+        def _income(self, query: Mapping[str, List[str]]) -> None:
+            year = _year(_field(query, "tax_year"))
+            self._page(
+                "income.html",
+                "Income",
+                section="income",
+                tax_year=year,
+                view=income_page(desk, year),
+            )
+
+        def _futures(self, query: Mapping[str, List[str]]) -> None:
+            year = _year(_field(query, "tax_year"))
+            self._page(
+                "futures.html",
+                "Futures",
+                section="futures",
+                tax_year=year,
+                view=futures_page(desk, year),
+            )
+
+        def _futures_save(self) -> None:
+            year = _year(self._req.form.get("tax_year", ""))
+            enabled = self._req.form.get("treat_as_capital") == "yes"
+            save_toggle(desk.root, enabled)
+            record(
+                desk.root,
+                self._actor(),
+                "Saved the futures comparison switch.",
+                "override",
+            )
+            self._redirect(f"/futures?tax_year={year}")
+
+        def _missing(self, query: Mapping[str, List[str]]) -> None:
+            year = _year(_field(query, "tax_year"))
+            self._page(
+                "missing_cost.html",
+                "Missing cost",
+                section="missing-cost",
+                tax_year=year,
+                view=missing_page(desk, year),
+            )
+
+        def _spam(self) -> None:
+            self._page("spam.html", "Spam filter", section="spam", view=spam_page(desk))
+
+        def _spam_post(self) -> None:
+            form = self._req.form
+            who = self._actor()
+            if form.get("action") == "restore":
+                restore_row(desk, form.get("row_id", ""), who)
+                record(desk.root, who, "Restored a row the spam filter had dropped.", "override")
+            else:
+                drop_rows(desk, [form.get("row_id", "")], who)
+                record(desk.root, who, "Dropped a look-alike row.", "override")
+            self._redirect("/spam")
+
+        def _queues(self, query: Mapping[str, List[str]]) -> None:
+            year = _year(_field(query, "tax_year"))
+            self._page(
+                "queues.html",
+                "Queues",
+                section="queues",
+                tax_year=year,
+                view=queue_page(desk, year),
+            )
+
+        def _queues_post(self) -> None:
+            form = self._req.form
+            who = self._actor()
+            if form.get("kind") == "gap":
+                save_gap(
+                    desk.root,
+                    form.get("venue", ""),
+                    form.get("status", ""),
+                    form.get("note", ""),
+                    who,
+                )
+                record(desk.root, who, "Added a known gap.", "override")
+            else:
+                save_transfer_note(
+                    desk.root, form.get("id", ""), form.get("status", ""), form.get("note", "")
+                )
+                record(desk.root, who, "Updated an unmatched transfer.", "override")
+            self._redirect("/queues")
+
+        def _allocations(self) -> None:
+            self._page(
+                "allocations.html",
+                "Allocations",
+                section="allocations",
+                view=allocation_page(desk),
+            )
+
+        def _allocations_post(self) -> None:
+            form = self._req.form
+            who = self._actor()
+            if form.get("action") == "negligible":
+                mark_negligible(desk.root, form.get("payment", ""), who)
+                record(
+                    desk.root,
+                    who,
+                    "Marked a negligible-value claim as accountant-only.",
+                    "override",
+                )
+            else:
+                link_manually(desk.root, form.get("payment", ""), form.get("claim", ""), who)
+                record(desk.root, who, "Linked an allocation lot by hand.", "override")
+            self._redirect("/allocations")
 
         def _prices(self) -> None:
             rows = desk.all_rows()
@@ -722,6 +864,7 @@ def _handler_for(  # pylint: disable=too-many-statements
                 section="prices",
                 missing=missing_slots(rows),
                 missed=load_misses(desk),
+                valuation=valuation_rows(desk)["rows"],
             )
 
         def _prices_fetch(self) -> None:
@@ -751,7 +894,13 @@ def _handler_for(  # pylint: disable=too-many-statements
             self._plan("", result, form)
 
         def _matches(self) -> None:
-            self._page("matches.html", "Matches", section="matches", view=match_view(desk))
+            query = parse_qs(urlparse(self.path).query)
+            year = _year(_field(query, "tax_year"))
+            view = match_view(desk)
+            extra = match_lines(desk, year)
+            view["matching"] = extra["matching"]
+            view["match_error"] = extra["error"]
+            self._page("matches.html", "Matches", section="matches", view=view, tax_year=year)
 
         def _audit(self) -> None:
             from .events import read_events  # pylint: disable=import-outside-toplevel
@@ -813,17 +962,23 @@ def _handler_for(  # pylint: disable=too-many-statements
 
         def _losses_save(self) -> None:
             form = self._req.form
+            who = self._actor()
             try:
-                save_opening(desk.root, form.get("year", ""), form.get("amount", ""))
+                if form.get("claim_year"):
+                    save_claim(desk.root, form.get("claim_year", ""), form.get("claim_status", ""))
+                    record(desk.root, who, "Saved a loss claim status.", "override")
+                else:
+                    save_opening(desk.root, form.get("year", ""), form.get("amount", ""))
+                    record(desk.root, who, "Saved opening losses.", "override")
             except DeskError as exc:
                 self._redirect("/losses?error=" + quote(str(exc)))
                 return
             append_event(
                 desk.root,
                 "losses",
-                self._actor(),
-                "Opening losses were saved.",
-                {"year": form.get("year", "")},
+                who,
+                "Loss figures were saved.",
+                {"year": form.get("claim_year") or form.get("year", "")},
             )
             self._redirect("/losses")
 
@@ -1041,7 +1196,20 @@ def _first(parsed: Mapping[str, List[str]], key: str) -> str:
 
 
 def _year_action(path: str) -> str:
-    if path in {"/", "/report", "/health", "/review", "/koinly", "/plan"}:
+    kept = {
+        "/",
+        "/report",
+        "/health",
+        "/review",
+        "/koinly",
+        "/plan",
+        "/income",
+        "/futures",
+        "/missing-cost",
+        "/matches",
+        "/queues",
+    }
+    if path in kept:
         return path
     return "/report"
 

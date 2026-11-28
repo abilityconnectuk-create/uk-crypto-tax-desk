@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block body %}
+    <div class="page-head">
+        <div>
+            <h1>Queues</h1>
+            <p class="lede">
+                Unmatched transfers, and venues that are closed or inaccessible.
+                Each entry has a status and a note. The accountant pack includes this list.
+            </p>
+        </div>
+    </div>
+    <p class="banner">AWAITING TAX REVIEW</p>
+    <h2>Unmatched transfers</h2>
+    {% for row in view.transfers %}
+        <article class="card pad">
+            <p>
+                <strong>{{ row.kind }}</strong>
+                {{ row.asset }} {{ row.when }}. {{ row.detail }}
+            </p>
+            <form method="post" action="/queues" class="filters">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <input type="hidden" name="kind" value="transfer">
+                <input type="hidden" name="id" value="{{ row.id }}">
+                <label>
+                    Status
+                    <select name="status">
+                        {% for status in ("open", "noted", "closed") %}
+                            <option value="{{ status }}"
+                                    {% if row.status == status %}selected{% endif %}>{{ status }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    Note
+                    <input name="note" value="{{ row.note }}">
+                </label>
+                <button type="submit">Save</button>
+            </form>
+        </article>
+    {% else %}
+        <p>No unmatched transfers.</p>
+    {% endfor %}
+    <h2>Known gaps</h2>
+    <section class="card pad">
+        <form method="post" action="/queues" class="filters">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="kind" value="gap">
+            <label>
+                Venue
+                <input name="venue" required>
+            </label>
+            <label>
+                Status
+                <select name="status">
+                    <option value="open">open</option>
+                    <option value="noted">noted</option>
+                    <option value="closed">closed</option>
+                </select>
+            </label>
+            <label>
+                Note
+                <input name="note" placeholder="Closed, or no longer accessible">
+            </label>
+            <button type="submit" class="btn primary">Add gap</button>
+        </form>
+    </section>
+    <table>
+        <thead>
+            <tr>
+                <th>Venue</th>
+                <th>Status</th>
+                <th>Note</th>
+                <th>Who</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in view.gaps %}
+                <tr>
+                    <td>{{ row.venue }}</td>
+                    <td>{{ row.status }}</td>
+                    <td>{{ row.note }}</td>
+                    <td>{{ row.who }}</td>
+                </tr>
+            {% else %}
+                <tr>
+                    <td colspan="4">No known gaps.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% endblock %}

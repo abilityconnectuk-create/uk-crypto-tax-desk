@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block body %}
+    <div class="page-head">
+        <div>
+            <h1>Futures and perpetuals</h1>
+            <p class="lede">
+                Realised result, trading fees and funding fees are kept apart from the capital-gains figures.
+            </p>
+        </div>
+    </div>
+    <p class="banner">AWAITING TAX REVIEW</p>
+    <section class="card pad">
+        <p class="warn">{{ view.report.open_question }}</p>
+        <form method="post" action="/futures" class="filters">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="tax_year" value="{{ tax_year }}">
+            <label>
+                <input type="checkbox"
+                       name="treat_as_capital"
+                       value="yes"
+                       {% if view.report.treat_as_capital %}checked{% endif %}>
+                Treat other gains as capital gains, for comparison only
+            </label>
+            <button type="submit" class="btn primary">Save comparison</button>
+        </form>
+        <p>
+            This switch mirrors a Koinly comparison setting.
+            It does not change the SA108 figures and it does not write to Koinly.
+        </p>
+    </section>
+    <table>
+        <tbody>
+            <tr>
+                <th>Realised result</th>
+                <td>{{ view.report.realised | gbp }}</td>
+            </tr>
+            <tr>
+                <th>Trading fees</th>
+                <td>{{ view.report.trading_fees | gbp }}</td>
+            </tr>
+            <tr>
+                <th>Funding fees</th>
+                <td>{{ view.report.funding_fees | gbp }}</td>
+            </tr>
+            <tr>
+                <th>Capital gains on the return</th>
+                <td>{{ view.report.capital_gains | gbp }}</td>
+            </tr>
+            <tr>
+                <th>Comparison if other gains were capital</th>
+                <td>{{ view.report.comparison_gains | gbp }}</td>
+            </tr>
+        </tbody>
+    </table>
+    <h2>Lines</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Bucket</th>
+                <th>Amount</th>
+                <th>Note</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in view.report.rows %}
+                <tr>
+                    <td>{{ row.date }}</td>
+                    <td>{{ row.bucket }}</td>
+                    <td>{{ row.amount | gbp }}</td>
+                    <td>{{ row.note }}</td>
+                </tr>
+            {% else %}
+                <tr>
+                    <td colspan="4">No futures or perpetual rows in this year.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% endblock %}

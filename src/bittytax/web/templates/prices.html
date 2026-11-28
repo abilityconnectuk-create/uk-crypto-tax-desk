@@ -6,6 +6,41 @@
         <input type="hidden" name="csrf" value="{{ csrf }}">
         <button type="submit">Fetch missing prices</button>
     </form>
+    <h2>Sterling valuation</h2>
+    <p class="banner">AWAITING TAX REVIEW</p>
+    <p>
+        Each event is valued in GBP at the time it happens.
+        The price and the foreign-exchange source are stored with the row.
+        A USD total is not converted at one year-end rate. Manual CRYPTO23000.
+    </p>
+    <table>
+        <thead>
+            <tr>
+                <th>When</th>
+                <th>Asset</th>
+                <th>USD</th>
+                <th>GBP</th>
+                <th>Price</th>
+                <th>Source</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in valuation %}
+                <tr>
+                    <td>{{ row.when }}</td>
+                    <td>{{ row.asset }}</td>
+                    <td>{% if row.usd %}USD {{ row.usd }}{% else %}Not on the row{% endif %}</td>
+                    <td>{% if row.gbp %}{{ row.gbp | gbp }}{% else %}No event price{% endif %}</td>
+                    <td>{{ row.price }}</td>
+                    <td>{{ row.fx_source }}</td>
+                </tr>
+            {% else %}
+                <tr>
+                    <td colspan="6">No events yet.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
     <h2>Still missing</h2>
     {% if missing %}
         <table>

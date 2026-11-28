@@ -33,6 +33,26 @@
             <p>Gains {{ row.gains }}. Gross losses {{ row.gross_losses }}. Allowance {{ row.allowance }}.</p>
             <p>SA108 box 45, brought-forward losses used: {{ row.brought_used }}.</p>
             <p>SA108 box 47, losses carried forward: {{ row.carried }}.</p>
+            <p>Claim status {{ row.claim_status }}. Four-year deadline {{ row.deadline }}.</p>
+            {% if row.warning == "past" %}
+                <p class="warn">The four-year claim deadline for this year has passed. An accountant should review whether a claim can still be made.</p>
+            {% elif row.warning == "near" %}
+                <p class="warn">The four-year claim deadline is within 90 days.</p>
+            {% endif %}
+            <form method="post" action="/losses" class="filters">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <input type="hidden" name="claim_year" value="{{ row.year }}">
+                <label>
+                    Claim status
+                    <select name="claim_status">
+                        <option value="unclaimed"
+                                {% if row.claim_status != "claimed" %}selected{% endif %}>unclaimed</option>
+                        <option value="claimed"
+                                {% if row.claim_status == "claimed" %}selected{% endif %}>claimed</option>
+                    </select>
+                </label>
+                <button type="submit" class="ghost">Save claim status</button>
+            </form>
             <p class="banner">{{ row.banner }}</p>
         </section>
     {% else %}

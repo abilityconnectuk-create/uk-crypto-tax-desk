@@ -21,6 +21,74 @@
         </label>
         <button type="submit">Compare</button>
     </form>
+    <form method="post" action="/koinly/tolerance" class="filters">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="tax_year" value="{{ tax_year }}">
+        <label>
+            Tolerance
+            <input name="tolerance" value="{{ tolerance or '0.01' }}">
+        </label>
+        <button type="submit" class="ghost">Save tolerance</button>
+    </form>
+    {% if definition %}
+        <section class="card pad">
+            <h2>Box 13.1 disposal count</h2>
+            <p>{{ definition }}</p>
+        </section>
+    {% endif %}
+    {% if reconciliation %}
+        <h2>Reconciliation</h2>
+        <p class="banner">AWAITING TAX REVIEW</p>
+        <p>
+            Tolerance {{ reconciliation.tolerance }}.
+            Manual overrides on the ledger: {{ overrides }}.
+            A money difference is called a manual override only when an amount was recorded for it.
+            This page reads an imported file. It does not write to Koinly.
+        </p>
+        {% if reconciliation.unexplained %}
+            <p class="warn">At least one difference is still unexplained.</p>
+        {% endif %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Figure</th>
+                    <th>Desk</th>
+                    <th>Koinly</th>
+                    <th>Difference</th>
+                    <th>Cause</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in reconciliation.rows %}
+                    <tr {% if row.unexplained %}class="diff"{% endif %}>
+                        <td>{{ row.metric }}</td>
+                        <td>
+                            {% if row.metric == "disposals" %}
+                                {{ row.desk }}
+                            {% else %}
+                                {{ row.desk | gbp }}
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if row.koinly == "" %}
+                                Not in the file
+                            {% elif row.metric == "disposals" %}
+                                {{ row.koinly }}
+                            {% else %}
+                                {{ row.koinly | gbp }}
+                            {% endif %}
+                        </td>
+                        <td>{{ row.difference }}</td>
+                        <td>
+                            {% for cause in row.causes %}
+                                {{ cause.cause }}{% if not loop.last %}, {% endif %}
+                            {% endfor %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
     {% if comparison %}
         <p>Koinly totals taken from the {{ comparison.source }} file.</p>
         <h2>Totals</h2>

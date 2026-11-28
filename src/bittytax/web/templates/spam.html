@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block body %}
+    <div class="page-head">
+        <div>
+            <h1>Spam filter</h1>
+            <p class="lede">
+                Look-alike tokens, and dust from a look-alike address, can be dropped.
+                The log records what was dropped. Restore puts the earlier type back.
+            </p>
+        </div>
+    </div>
+    <p class="banner">AWAITING TAX REVIEW</p>
+    <h2>Would drop</h2>
+    {% for row in view.candidates %}
+        <article class="card pad">
+            <p>
+                <strong>{{ row.asset }}</strong>
+                {{ row.when }}. {{ row.reason }}.
+            </p>
+            <form method="post" action="/spam">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <input type="hidden" name="action" value="drop">
+                <input type="hidden" name="row_id" value="{{ row.row_id }}">
+                <button type="submit">Drop</button>
+            </form>
+        </article>
+    {% else %}
+        <p>Nothing to drop.</p>
+    {% endfor %}
+    <h2>Log</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Row</th>
+                <th>Reason</th>
+                <th>Earlier type</th>
+                <th>Restored</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in view.log %}
+                <tr>
+                    <td>{{ row.row_id }}</td>
+                    <td>{{ row.reason }}</td>
+                    <td>{{ row.before_type }}</td>
+                    <td>{{ row.restored }}</td>
+                    <td>
+                        {% if row.restored != "yes" %}
+                            <form method="post" action="/spam">
+                                <input type="hidden" name="csrf" value="{{ csrf }}">
+                                <input type="hidden" name="action" value="restore">
+                                <input type="hidden" name="row_id" value="{{ row.row_id }}">
+                                <button type="submit">Restore</button>
+                            </form>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% else %}
+                <tr>
+                    <td colspan="5">The filter has not dropped a row.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% endblock %}

@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block body %}
+    <div class="page-head">
+        <div>
+            <h1>Allocations</h1>
+            <p class="lede">
+                Pending lots are linked only when you name the payment and the claim.
+                A refund reverses the original payment. A negligible-value claim is accountant-only and posts no loss.
+            </p>
+        </div>
+    </div>
+    <p class="banner">AWAITING TAX REVIEW</p>
+    <h2>Pending lots</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Label</th>
+                <th>Payment</th>
+                <th>Asset</th>
+                <th>Gross</th>
+                <th>Refunded</th>
+                <th>Pending</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in view.lots %}
+                <tr>
+                    <td>{{ row.label }}</td>
+                    <td>{{ row.payment }}</td>
+                    <td>{{ row.asset }}</td>
+                    <td>{{ row.gross }}</td>
+                    <td>{{ row.refunded }}</td>
+                    <td>{{ row.pending }}</td>
+                </tr>
+            {% else %}
+                <tr>
+                    <td colspan="6">No pending allocation lots.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <section class="card pad">
+        <h2>Link manually</h2>
+        <form method="post" action="/allocations" class="filters">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="action" value="link">
+            <label>
+                Payment
+                <input name="payment">
+            </label>
+            <label>
+                Claim
+                <input name="claim">
+            </label>
+            <button type="submit">Link</button>
+        </form>
+    </section>
+    <section class="card pad">
+        <h2>Negligible-value claim</h2>
+        <p>This records an open question. It does not post a loss.</p>
+        <form method="post" action="/allocations" class="filters">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="action" value="negligible">
+            <label>
+                Payment
+                <input name="payment">
+            </label>
+            <button type="submit">Mark accountant-only</button>
+        </form>
+        {% for row in view.claims %}
+            <p>{{ row.payment }}: {{ row.open_question }}</p>
+        {% endfor %}
+    </section>
+{% endblock %}

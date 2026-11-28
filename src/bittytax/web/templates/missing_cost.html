@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block body %}
+    <div class="page-head">
+        <div>
+            <h1>Missing cost</h1>
+            <p class="lede">
+                Each disposal with no cost basis, and the gain totals with and without those rows.
+                A gap is not filled by setting worth equal to cost.
+            </p>
+        </div>
+    </div>
+    <p class="banner">AWAITING TAX REVIEW</p>
+    {% if view.error %}<p class="warn">{{ view.error }}</p>{% endif %}
+    <section class="card pad">
+        <p>{{ view.missing.note }}</p>
+        <p>Gains with these rows {{ view.missing.with_rows | gbp }}.</p>
+        <p>Gains without these rows {{ view.missing.without_rows | gbp }}.</p>
+        <p>Effect of the rows with no cost {{ view.missing.gap_effect | gbp }}.</p>
+    </section>
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Asset</th>
+                <th>Quantity</th>
+                <th>Cost</th>
+                <th>Proceeds</th>
+                <th>Gain</th>
+                <th>Effect on gains</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in view.missing.rows %}
+                <tr>
+                    <td>{{ row.date }}</td>
+                    <td>{{ row.asset }}</td>
+                    <td>{{ row.quantity }}</td>
+                    <td>{{ row.cost | gbp }}</td>
+                    <td>{{ row.proceeds | gbp }}</td>
+                    <td>{{ row.gain | gbp }}</td>
+                    <td>{{ row.gain_effect | gbp }}</td>
+                </tr>
+            {% else %}
+                <tr>
+                    <td colspan="7">No disposal in this year is missing a cost basis.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% endblock %}

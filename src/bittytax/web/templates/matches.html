@@ -38,6 +38,47 @@
         </form>
     </section>
     <section class="card pad">
+        <h2>Disposal matching</h2>
+        <p class="banner">AWAITING TAX REVIEW</p>
+        {% if view.match_error %}<p class="warn">{{ view.match_error }}</p>{% endif %}
+        <p>{{ view.matching.note }}</p>
+        <p>
+            Order:
+            {% for name in view.matching.order %}
+                {{ name }}{% if not loop.last %}, then {% endif %}
+            {% endfor %}.
+            Manual {{ view.matching.manual }}.
+        </p>
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Asset</th>
+                    <th>Quantity</th>
+                    <th>Proceeds</th>
+                    <th>Gain</th>
+                    <th>Matching rule</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in view.matching.rows %}
+                    <tr>
+                        <td>{{ row.date }}</td>
+                        <td>{{ row.asset }}</td>
+                        <td>{{ row.quantity }}</td>
+                        <td>{{ row.proceeds | gbp }}</td>
+                        <td>{{ row.gain | gbp }}</td>
+                        <td>{{ row.matching_rule }}</td>
+                    </tr>
+                {% else %}
+                    <tr>
+                        <td colspan="6">No disposals for this tax year.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+    <section class="card pad">
         <h2>Suggested matches</h2>
         {% for item in view.suggested %}
             <article>
