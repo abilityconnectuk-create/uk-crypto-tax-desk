@@ -31,6 +31,14 @@ from .auth import (
     is_tailscale_ip,
     safe_next,
 )
+from .backup import (
+    backup_now,
+    ensure_daily_backup,
+    list_backups,
+    restore_backup,
+    retention_count,
+    save_retention,
+)
 from .config_view import config_snapshot
 from .convert import allowed_types
 from .cost_basis import trace_rows
@@ -119,6 +127,7 @@ def bind_server(root: Path, port: int, host: str = "127.0.0.1") -> ThreadingHTTP
     """Bind the desk. The host must be this computer, or a Tailscale address."""
     bind_host = canonical_bind_host(host)
     desk = Desk(root)
+    ensure_daily_backup(root)
     desk_auth = DeskAuth(root)
     handler = _handler_for(desk, desk_auth, bind_host)
     ThreadingHTTPServer.allow_reuse_address = True
@@ -271,6 +280,11 @@ def _handler_for(  # pylint: disable=too-many-statements
                 ("GET", "/defi"): lambda: self._defi(query),
                 ("GET", "/losses"): lambda: self._losses(query),
                 ("POST", "/losses"): self._losses_save,
+                ("GET", "/audit"): self._audit,
+                ("POST", "/audit/undo"): self._audit_undo,
+                ("POST", "/audit/backup"): self._audit_backup,
+                ("POST", "/audit/restore"): self._audit_restore,
+                ("POST", "/audit/retention"): self._audit_retention,
                 ("POST", "/matches/run"): self._matches_run,
                 ("POST", "/matches/decide"): self._matches_decide,
                 ("POST", "/matches/settings"): self._matches_settings,
@@ -444,6 +458,7 @@ def _handler_for(  # pylint: disable=too-many-statements
             )
 
         def _bulk(self) -> None:
+            backup_now(desk.root, "before a bulk change", self._actor())
             parsed = parse_qs(
                 self._req.raw.decode("utf-8", errors="replace"), keep_blank_values=True
             )
@@ -698,6 +713,53 @@ def _handler_for(  # pylint: disable=too-many-statements
 
         def _matches(self) -> None:
             self._page("matches.html", "Matches", section="matches", view=match_view(desk))
+
+        def _audit(self) -> None:
+            from .events import read_events  # pylint: disable=import-outside-toplevel
+
+            self._page(
+                "audit.html",
+                "Audit",
+                section="audit",
+                view={
+                    "events": list(reversed(read_events(desk.root))),
+                    "changes": desk.change_log(),
+                    "backups": list_backups(desk.root),
+                    "retention": retention_count(desk.root),
+                },
+            )
+
+        def _audit_undo(self) -> None:
+            row_id = self._req.form.get("row_id", "")
+            latest = None
+            for entry in desk.change_log():
+                if entry.get("row_id") == row_id:
+                    latest = entry
+            if latest is not None:
+                desk.reclassify(
+                    row_id,
+                    str(latest.get("before_type") or ""),
+                    "Undo the latest change.",
+                    self._actor(),
+                    "",
+                    True,
+                )
+                append_event(
+                    desk.root, "undo", self._actor(), "A change was undone.", {"row": row_id}
+                )
+            self._redirect("/audit")
+
+        def _audit_backup(self) -> None:
+            backup_now(desk.root, "manual", self._actor())
+            self._redirect("/audit")
+
+        def _audit_restore(self) -> None:
+            restore_backup(desk.root, self._req.form.get("name", ""), self._actor())
+            self._redirect("/audit")
+
+        def _audit_retention(self) -> None:
+            save_retention(desk.root, self._req.form.get("count", ""))
+            self._redirect("/audit")
 
         def _losses(self, query: Mapping[str, List[str]]) -> None:
             from .losses import load_opening  # pylint: disable=import-outside-toplevel
