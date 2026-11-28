@@ -1,84 +1,185 @@
 {% extends "base.html" %}
+{% import "macros.html" as ui with context %}
 {% block body %}
-    <h1>Local tax desk</h1>
-    <p class="lede">Imports stay in the data directory on this computer. Reports are calculated by BittyTax on this computer.</p>
-    <p class="banner">{{ board.banner }}</p>
-    <h2>This tax year, {{ board.label }}</h2>
-    <ul class="stats">
-        <li><strong>{{ board.realised|gbp }}</strong> realised gain so far</li>
-        <li><strong>{{ board.allowance|gbp }}</strong> annual exempt amount</li>
-        <li><strong>{{ board.allowance_used|gbp }}</strong> of that amount used</li>
-        <li><strong>{{ board.allowance_remaining|gbp }}</strong> remaining</li>
-    </ul>
-    <p>The annual exempt amount is shown here. It is not deducted from the reported gains. {{ board.losses_carried }}</p>
-    {% if board.note %}<p class="warn">{{ board.note }}</p>{% endif %}
-    {% if board.holdings %}
-        <h2>Holdings</h2>
-        <div class="chart">
-            {% for row in board.holdings %}
-                <p class="bar">
-                    <span>{{ row.asset }}</span>
-                    <svg viewBox="0 0 100 8" width="220" height="12" role="img">
-                        <title>{{ row.asset }} cost {{ row.cost|gbp }}</title>
-                        <rect width="{{ row.bar }}" height="8"></rect>
-                    </svg>
-                </p>
+    {{ ui.steps(view.steps) }}
+    <section class="card hero" aria-labelledby="portfolio-heading">
+        <p class="eyebrow" id="portfolio-heading">Local tax desk · {{ view.label }}</p>
+        <p class="hero-value">{{ view.hero|gbp }}</p>
+        <p class="change {{ view.change.way }}">
+            {% if view.change.way == "up" %}+{% endif %}
+            {{ view.change.amount|gbp }}
+            {% if view.change.percent %}
+                ({{ view.change.percent }}%)
+            {% endif %}
+            <span class="muted">in this period</span>
+        </p>
+        <div class="periods" role="group" aria-label="Chart period">
+            {% for item in view.periods %}
+                <a href="/?range={{ item.id }}&tax_year={{ view.tax_year }}"
+                   {% if view.span == item.id %}aria-current="true"{% endif %}>{{ item.label }}</a>
             {% endfor %}
         </div>
-        <table>
+        <div class="chart">
+            {% if view.svg %}
+                {{ view.svg|safe }}
+            {% else %}
+                <p>No value in this period yet.</p>
+            {% endif %}
+        </div>
+        {% if view.points %}
+            <table class="sr">
+                <caption>Illustrative value over time</caption>
+                {% for point in view.points %}
+                    <tr>
+                        <th>{{ point.date }}</th>
+                        <td>{{ point.value }}</td>
+                    </tr>
+                {% endfor %}
+            </table>
+        {% endif %}
+        <p class="fine">
+            {% if view.hero_valued %}
+                The line uses the latest cached price on the quantity held after each day. It is not a tax figure.
+            {% else %}
+                No cached price yet, so the total is the pooled cost. It is not a tax figure.
+            {% endif %}
+        </p>
+        <div class="stat-strip">
+            <div>
+                <span>Cost basis {{ ui.tip("s104") }}</span>
+                <strong>{{ view.cost|gbp }}</strong>
+            </div>
+            <div>
+                <span>Unrealised gain</span>
+                <strong class="{% if view.unrealised.startswith('-') %}down{% elif view.unrealised %}up{% endif %}">
+                    {{ view.unrealised|gbp }}
+                </strong>
+            </div>
+            <div>
+                <span>Realised gain this tax year {{ ui.tip("annual_exempt") }}</span>
+                <strong>{{ view.realised|gbp }}</strong>
+            </div>
+            <div>
+                <span>Income</span>
+                <strong>{{ view.income|gbp }}</strong>
+            </div>
+        </div>
+    </section>
+    <p class="banner">{{ view.banner }}</p>
+    <div class="grid-3">
+        <section class="card pad">
+            <h2>Allocation</h2>
+            {% if view.slices %}
+                <div class="alloc">
+                    {{ view.donut|safe }}
+                    <ul class="legend">
+                        {% for slice in view.slices %}
+                            <li>
+                                <span class="swatch s{{ slice.slot }}"></span>
+                                {{ slice.asset }}
+                                <span class="muted">{{ slice.pct }}%</span>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            {% else %}
+                <p>No holdings yet.</p>
+            {% endif %}
+        </section>
+        <section class="card pad">
+            <h2>
+                Allowance used
+                {{ ui.tip('annual_exempt', '-b') }}
+            </h2>
+            <p class="hero-value">{{ view.allowance_remaining|gbp }}</p>
+            <p class="fine">remaining of {{ view.allowance|gbp }}</p>
+            <svg class="meter"
+                 viewBox="0 0 100 8"
+                 role="meter"
+                 aria-valuemin="0"
+                 aria-valuemax="100"
+                 aria-valuenow="{{ view.allowance_pct }}"
+                 aria-label="Annual exempt amount used">
+                <rect class="meter-track" x="0" y="0" width="100" height="8" rx="4"></rect>
+                <rect class="meter-fill" x="0" y="0" width="{{ view.allowance_pct }}" height="8" rx="4"></rect>
+            </svg>
+            <p class="fine">{{ view.allowance_used|gbp }} used. {{ view.losses }}</p>
+        </section>
+        <section class="card pad">
+            <h2>Data health</h2>
+            {% if view.health_total %}
+                <p class="hero-value">{{ view.health_total }}</p>
+                <p class="fine">to fix before you rely on a report.</p>
+                <p>
+                    <a href="/health?tax_year={{ view.tax_year }}">Open data health</a>
+                </p>
+            {% else %}
+                <p class="status ok">Nothing to fix</p>
+                <p class="fine">The data-health list is clear for {{ view.label }}.</p>
+            {% endif %}
+        </section>
+    </div>
+    {% if view.note %}<p class="warn">{{ view.note }}</p>{% endif %}
+    <section class="card" aria-labelledby="holdings-heading">
+        <div class="page-head pad">
+            <h2 id="holdings-heading">Holdings</h2>
+            <form method="get" action="/">
+                <input type="hidden" name="range" value="{{ view.span }}">
+                <input type="hidden" name="tax_year" value="{{ view.tax_year }}">
+                <input type="hidden" name="hsort" value="{{ view.hsort }}">
+                <input type="hidden" name="hdir" value="{{ view.hdir }}">
+                <label class="sr" for="holding-search">Search holdings</label>
+                <input id="holding-search"
+                       class="search"
+                       name="hq"
+                       value="{{ view.hq }}"
+                       placeholder="Search holdings"
+                       type="search">
+            </form>
+        </div>
+        <table class="cards" id="holdings">
             <thead>
                 <tr>
-                    <th>Asset</th>
-                    <th>Quantity</th>
-                    <th>Cost</th>
-                    <th>Value</th>
-                    <th>Unrealised</th>
+                    <th>
+                        <a href="/?range={{ view.span }}&amp;tax_year={{ view.tax_year }}&amp;hq={{ view.hq|urlencode }}&amp;hsort=asset&amp;hdir={% if view.hsort == 'asset' and view.hdir == 'desc' %}asc{% else %}desc{% endif %}">Asset</a>
+                    </th>
+                    <th>
+                        <a href="/?range={{ view.span }}&amp;tax_year={{ view.tax_year }}&amp;hq={{ view.hq|urlencode }}&amp;hsort=quantity&amp;hdir={% if view.hsort == 'quantity' and view.hdir == 'desc' %}asc{% else %}desc{% endif %}">Balance</a>
+                    </th>
+                    <th>
+                        <a href="/?range={{ view.span }}&amp;tax_year={{ view.tax_year }}&amp;hq={{ view.hq|urlencode }}&amp;hsort=value&amp;hdir={% if view.hsort == 'value' and view.hdir == 'desc' %}asc{% else %}desc{% endif %}">Value</a>
+                    </th>
+                    <th>
+                        <a href="/?range={{ view.span }}&amp;tax_year={{ view.tax_year }}&amp;hq={{ view.hq|urlencode }}&amp;hsort=cost&amp;hdir={% if view.hsort == 'cost' and view.hdir == 'desc' %}asc{% else %}desc{% endif %}">Cost basis</a>
+                    </th>
+                    <th>
+                        <a href="/?range={{ view.span }}&amp;tax_year={{ view.tax_year }}&amp;hq={{ view.hq|urlencode }}&amp;hsort=gain&amp;hdir={% if view.hsort == 'gain' and view.hdir == 'desc' %}asc{% else %}desc{% endif %}">Gain / loss</a>
+                    </th>
                 </tr>
             </thead>
             <tbody>
-                {% for row in board.holdings %}
+                {% for row in view.holdings %}
                     <tr>
-                        <td>{{ row.asset }}</td>
-                        <td>{{ row.quantity }}</td>
-                        <td>{{ row.cost|gbp }}</td>
-                        <td>{{ row.value|gbp }}</td>
-                        <td>{{ row.unrealised|gbp }}</td>
+                        <td data-label="Asset">
+                            <span class="asset">
+                                <span class="letter av-{{ row.asset|slot }}">{{ row.asset[:1] }}</span>
+                                {{ row.asset }}
+                            </span>
+                        </td>
+                        <td data-label="Balance">{{ row.quantity }}</td>
+                        <td data-label="Value">{{ row.value|gbp }}</td>
+                        <td data-label="Cost basis">{{ row.cost|gbp }}</td>
+                        <td data-label="Gain / loss"
+                            class="{% if row.unrealised.startswith('-') %}down{% elif row.unrealised %}up{% endif %}">
+                            {{ row.unrealised|gbp }}
+                        </td>
+                    </tr>
+                {% else %}
+                    <tr>
+                        <td colspan="5">No holdings yet. Import a file to see them here.</td>
                     </tr>
                 {% endfor %}
             </tbody>
         </table>
-    {% endif %}
-    <ul class="stats">
-        <li><strong>{{ counts.transactions }}</strong> transactions</li>
-        <li><strong>{{ counts.imports }}</strong> imports</li>
-        <li><strong>{{ counts.queue }}</strong> on the review queue</li>
-        <li><strong>{{ counts.needs_review }}</strong> need review</li>
-        <li><strong>{{ counts.spam }}</strong> possible spam</li>
-        <li><strong>{{ counts.unmapped }}</strong> unmapped tags</li>
-    </ul>
-    {% if imports %}
-        <h2>Imports</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>File</th>
-                    <th>Rows</th>
-                    <th>Dates</th>
-                    <th>Hash</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in imports %}
-                    <tr>
-                        <td>{{ item.filename }}</td>
-                        <td>{{ item.row_count }}</td>
-                        <td>{{ item.date_min }} – {{ item.date_max }}</td>
-                        <td><code>{{ item.sha256[:12] }}</code></td>
-                    </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    {% else %}
-        <p>No files imported yet. Start with a Koinly CSV, or any export the conversion tool already recognises.</p>
-    {% endif %}
+    </section>
 {% endblock %}

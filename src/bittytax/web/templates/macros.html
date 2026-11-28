@@ -1,0 +1,145 @@
+{% macro icon(name) -%}
+    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        {% if name == "home" %}
+            <path d="M4 11.5 12 4l8 7.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+        {% elif name == "report" %}
+            <path d="M7 3.5h7l4 4V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.6" />
+            <path d="M14 3.5V8h4M8.5 12.5h7M8.5 16h5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        {% elif name == "wallet" %}
+            <rect x="3.5" y="6" width="17" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.6" />
+            <path d="M3.5 10h17M16 14.5h2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        {% elif name == "list" %}
+            <path d="M8 7h12M8 12h12M8 17h12M4 7h.01M4 12h.01M4 17h.01" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        {% elif name == "health" %}
+            <path d="M3 12h4l2.2-5 3.6 10L15 12h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        {% elif name == "plan" %}
+            <rect x="4" y="5" width="16" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.6" />
+            <path d="M8 3.5v4M16 3.5v4M4 10h16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        {% elif name == "check" %}
+            <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.6" />
+            <path d="M8.5 12.2 11 14.5l4.5-5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        {% elif name == "settings" %}
+            <path d="M4 8h16M4 16h16M8 8v0M16 16v0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+            <circle cx="9" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1.6" />
+            <circle cx="15" cy="16" r="2" fill="none" stroke="currentColor" stroke-width="1.6" />
+        {% elif name == "moon" %}
+            <path d="M16 3.5A8 8 0 1 0 20.5 14 6.5 6.5 0 0 1 16 3.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+        {% elif name == "menu" %}
+            <path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        {% elif name == "close" %}
+            <path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        {% else %}
+            <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.6" />
+        {% endif %}
+    </svg>
+{%- endmacro %}
+{% macro tip(key, suffix="") -%}
+    {% set item = glossary[key] %}
+    <span class="tip">
+        <button type="button"
+                class="tip-btn"
+                aria-label="About {{ item.term }}"
+                aria-describedby="tip-{{ key }}{{ suffix }}">i</button>
+        <span class="tip-pop" role="tooltip" id="tip-{{ key }}{{ suffix }}">{{ item.text }}</span>
+    </span>
+{%- endmacro %}
+{% macro steps(items) -%}
+    <ol class="steps" aria-label="Guided steps">
+        {% for step in items %}
+            <li>
+                <a class="step {{ step.state }}" href="{{ step.href }}">
+                    <span class="step-icon" aria-hidden="true"></span>
+                    <span>
+                        <strong>{{ step.n }} {{ step.title }}</strong>
+                        <small>{{ step.detail }}</small>
+                        <span class="sr">{{ step.label }}</span>
+                    </span>
+                </a>
+            </li>
+        {% endfor %}
+    </ol>
+{%- endmacro %}
+{% macro tx_panel(row, error, saved, back) -%}
+    <article class="slide-card" id="tx-panel">
+        <div class="slide-top">
+            <h2 id="tx-dialog-title">{{ row.type }}</h2>
+            <a class="icon-btn"
+               href="{{ back }}"
+               data-close-panel
+               aria-label="Close">{{ icon("close") }}</a>
+        </div>
+        {% if saved %}
+            <p class="note">The change was appended to the log. The uploaded file was not edited.</p>
+        {% endif %}
+        {% if error %}<p class="warn">{{ error }}</p>{% endif %}
+        <p class="two">
+            <strong>{{ row.timestamp }}</strong>
+            <small>{{ row.wallet }}</small>
+        </p>
+        <p>
+            In {{ row.buy_quantity }} {{ row.buy_asset }}
+            {% if row.buy_value %}({{ row.buy_value | gbp }}){% endif %}
+            <br>
+            Out {{ row.sell_quantity }} {{ row.sell_asset }}
+            {% if row.sell_value %}({{ row.sell_value | gbp }}){% endif %}
+        </p>
+        {% if row.note %}<p>{{ row.note }}</p>{% endif %}
+        <p>
+            Status <span class="status {% if row.status == 'clear' %}ok{% else %}amber{% endif %}">{{ row.status }}</span>
+        </p>
+        {% if row.tag %}<p>DeFi tag {{ row.tag }}</p>{% endif %}
+        <p class="banner">AWAITING TAX REVIEW. A DeFi tag is a note on the row. It does not change the calculator type.</p>
+        {% if row.tag_note %}<p>{{ row.tag_note }}</p>{% endif %}
+        <form class="stack"
+              method="post"
+              action="/transactions/{{ row.import_id }}/{{ row.id.split(':')[1] }}">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <label for="type-{{ row.id }}">New type</label>
+            <select id="type-{{ row.id }}" name="type" required>
+                {% for kind in row.allowed_types %}
+                    <option value="{{ kind }}" {% if kind == row.type %}selected{% endif %}>{{ kind }}</option>
+                {% endfor %}
+            </select>
+            <label for="tag-{{ row.id }}">DeFi tag</label>
+            <select id="tag-{{ row.id }}" name="tag">
+                <option value="">No DeFi tag</option>
+                {% for item in row.defi_tags %}
+                    <option value="{{ item.id }}"
+                            {% if item.id == row.tag %}selected{% endif %}>{{ item.label }}</option>
+                {% endfor %}
+            </select>
+            <label for="why-{{ row.id }}">Why</label>
+            <textarea id="why-{{ row.id }}" name="why" required rows="3"></textarea>
+            <button type="submit">Save reclassification</button>
+        </form>
+        <h3>Change log</h3>
+        {% if row.log %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>When</th>
+                        <th>Who</th>
+                        <th>From</th>
+                        <th>To</th>
+                        <th>Why</th>
+                        <th>Tag</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for entry in row.log %}
+                        <tr>
+                            <td>{{ entry.at }}</td>
+                            <td>{{ entry.who }}</td>
+                            <td>{{ entry.before_type }}</td>
+                            <td>{{ entry.after_type }}</td>
+                            <td>{{ entry.why }}</td>
+                            <td>{{ entry.tag }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p>No changes yet. Each save is appended. Earlier lines are kept.</p>
+        {% endif %}
+    </article>
+{%- endmacro %}
