@@ -53,6 +53,7 @@ class Desk:
         self.root = root
         self.raw_dir = root / "raw"
         self._lock = threading.Lock()
+        self._row_cache: Optional[Tuple[Tuple[int, int, int], List[Dict[str, Any]]]] = None
         self.root.mkdir(parents=True, exist_ok=True)
         self.raw_dir.mkdir(parents=True, exist_ok=True)
 
@@ -421,7 +422,25 @@ class Desk:
         return packed
 
     def health_count(self, tax_year: int) -> int:
-        return int(self.health(tax_year)["total"])
+        cached = self._read_health_cache(tax_year)
+        if cached is not None:
+            return cached
+        total = int(self.health(tax_year)["total"])
+        cache = self._health_cache_path(tax_year)
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        _write_json(cache, {"total": total})
+        return total
+
+    def _health_cache_path(self, tax_year: int) -> Path:
+        digest = _file_digest(self.records_path)
+        return self.root / "health-cache" / f"{tax_year}-{digest}.json"
+
+    def _read_health_cache(self, tax_year: int) -> Optional[int]:
+        cache = self._health_cache_path(tax_year)
+        if not cache.is_file():
+            return None
+        loaded = json.loads(cache.read_text(encoding="utf-8"))
+        return int(loaded.get("total", 0))
 
     def counts(self) -> Dict[str, int]:
         review = self.review_lists()
@@ -463,6 +482,14 @@ class Desk:
             self._write_effective_unlocked()
 
     def _effective_rows(self) -> List[Dict[str, Any]]:
+        stamp = _source_stamp(self.root)
+        if self._row_cache is not None and self._row_cache[0] == stamp:
+            return list(self._row_cache[1])
+        rows = self._build_rows()
+        self._row_cache = (stamp, rows)
+        return list(rows)
+
+    def _build_rows(self) -> List[Dict[str, Any]]:
         changes = _latest_changes(self.change_log())
         fills = _latest_fills(self.price_fills())
         rows = []
@@ -807,6 +834,27 @@ def _public_report(report: Mapping[str, Any]) -> Dict[str, Any]:
         "delimiter",
     )
     return {key: report.get(key) for key in keys}
+
+
+def _source_stamp(root: Path) -> Tuple[int, int, int]:
+    return (
+        _file_stamp(root / "ledger.json"),
+        _file_stamp(root / "reclassifications.jsonl"),
+        _file_stamp(root / "price-fills.jsonl"),
+    )
+
+
+def _file_stamp(path: Path) -> int:
+    if not path.is_file():
+        return 0
+    stat = path.stat()
+    return stat.st_mtime_ns + stat.st_size
+
+
+def _file_digest(path: Path) -> str:
+    if not path.is_file():
+        return hashlib.sha256(b"").hexdigest()
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:

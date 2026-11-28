@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import re
+import subprocess
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from email import policy
@@ -79,6 +80,7 @@ from .sources_extra import (
 )
 from .store import Desk
 from .sync import import_ethereum, import_kraken, secrets_present
+from .updater import describe, repo_root, update_checkout
 from .user_rules import (
     apply_bulk,
     apply_enabled_rules,
@@ -255,6 +257,8 @@ def _handler_for(  # pylint: disable=too-many-statements
             routes = {
                 ("GET", "/"): self._home,
                 ("POST", "/year-end/dismiss"): self._year_end_dismiss,
+                ("GET", "/update"): lambda: self._update("", ""),
+                ("POST", "/update"): self._update_post,
                 ("GET", "/import"): self._import_form,
                 ("GET", "/import/add"): self._import_add,
                 ("GET", "/import/problems"): self._import_problems,
@@ -343,6 +347,28 @@ def _handler_for(  # pylint: disable=too-many-statements
                 view=view,
                 tax_year=view["tax_year"],
             )
+
+        def _update(self, error: str, message: str) -> None:
+            self._page(
+                "update.html",
+                "Update",
+                section="update",
+                view=describe(repo_root(), subprocess.run),
+                error=error,
+                message=message,
+            )
+
+        def _update_post(self) -> None:
+            root = repo_root()
+            if root is None:
+                self._update("This checkout is not a git repository.", "")
+                return
+            try:
+                message = update_checkout(root, subprocess.run)
+            except DeskError as exc:
+                self._update(str(exc), "")
+                return
+            self._update("", message)
 
         def _year_end_dismiss(self) -> None:
             dismiss_year_end(desk.root, date.today())

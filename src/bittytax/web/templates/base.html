@@ -78,6 +78,11 @@
                         {{ ui.icon("report") }}
                         <span class="nav-label">Cost basis</span>
                     </a>
+                    <a href="/update"
+                       {% if section == "update" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("settings") }}
+                        <span class="nav-label">Update</span>
+                    </a>
                     <a href="/audit"
                        {% if section == "audit" %}aria-current="page"{% endif %}>
                         {{ ui.icon("list") }}
