@@ -25,4 +25,78 @@
                autocomplete="off">
         <button type="submit">Import Kraken</button>
     </form>
+    <h2>Base and other EVM chains</h2>
+    <p>
+        The same explorer API as Ethereum, with a chain id. Base is built in.
+        A custom chain, such as one you add by explorer URL, is stored in the data directory.
+        {% if extra.chains %}A custom chain is already stored.{% endif %}
+    </p>
+    <form method="post" action="/sync/evm">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label for="evm_chain">Chain</label>
+        <select id="evm_chain" name="chain">
+            <option value="base">Base</option>
+            <option value="ethereum">Ethereum</option>
+            <option value="custom">Custom explorer</option>
+        </select>
+        <label for="evm_address">Address</label>
+        <input id="evm_address" name="address" autocomplete="off">
+        <label for="evm_key">Explorer API key</label>
+        <input id="evm_key" name="api_key" type="password" autocomplete="off">
+        <label for="evm_url">Explorer URL</label>
+        <input id="evm_url"
+               name="explorer_url"
+               placeholder="https://explorer.example/api">
+        <label for="evm_chain_id">Chain id</label>
+        <input id="evm_chain_id" name="chain_id">
+        <label for="evm_symbol">Native symbol</label>
+        <input id="evm_symbol" name="symbol" value="ETH">
+        <button type="submit">Import EVM</button>
+    </form>
+    <h2>Solana</h2>
+    <p>Native SOL balance changes from a public JSON-RPC node. Leave the URL empty to use the public mainnet node.</p>
+    <form method="post" action="/sync/solana">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label for="sol_address">Address</label>
+        <input id="sol_address" name="address" autocomplete="off">
+        <label for="sol_rpc">RPC URL</label>
+        <input id="sol_rpc" name="rpc_url">
+        <button type="submit">Import Solana</button>
+    </form>
+    <h2>KuCoin</h2>
+    <p>Read-only deposits. {% if extra.kucoin %}A key is already stored.{% endif %}</p>
+    <form method="post" action="/sync/kucoin">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label for="kucoin_key">API key</label>
+        <input id="kucoin_key" name="api_key" type="password" autocomplete="off">
+        <label for="kucoin_secret">API secret</label>
+        <input id="kucoin_secret"
+               name="api_secret"
+               type="password"
+               autocomplete="off">
+        <label for="kucoin_phrase">Passphrase</label>
+        <input id="kucoin_phrase"
+               name="passphrase"
+               type="password"
+               autocomplete="off">
+        <button type="submit">Import KuCoin</button>
+    </form>
+    <h2>Coinbase Advanced Trade</h2>
+    <p>Read-only fills. {% if extra.coinbase %}A key is already stored.{% endif %}</p>
+    <form method="post" action="/sync/coinbase">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label for="cb_key">API key</label>
+        <input id="cb_key" name="api_key" type="password" autocomplete="off">
+        <label for="cb_secret">API secret</label>
+        <input id="cb_secret" name="api_secret" type="password" autocomplete="off">
+        <button type="submit">Import Coinbase</button>
+    </form>
+    <h2>Revolut</h2>
+    <p>A Revolut CSV. The existing Revolut parser reads it. Nothing is fetched from the network.</p>
+    <form method="post" action="/sync/revolut" enctype="multipart/form-data">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label for="revolut_file">CSV file</label>
+        <input id="revolut_file" name="file" type="file" accept=".csv,text/csv">
+        <button type="submit">Import Revolut</button>
+    </form>
 {% endblock %}

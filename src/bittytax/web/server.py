@@ -58,6 +58,14 @@ from .prices import fetch_missing, load_misses, missing_slots
 from .rules import accountant_review_items, list_rule_years
 from .sa108 import sa108_view
 from .sources import detect_upload, parser_catalogue
+from .sources_extra import (
+    extra_status,
+    import_coinbase,
+    import_evm,
+    import_kucoin,
+    import_revolut_csv,
+    import_solana,
+)
 from .store import Desk
 from .sync import import_ethereum, import_kraken, secrets_present
 from .user_rules import (
@@ -264,6 +272,11 @@ def _handler_for(  # pylint: disable=too-many-statements
                 ("GET", "/sync"): self._sync,
                 ("POST", "/sync/ethereum"): self._sync_ethereum,
                 ("POST", "/sync/kraken"): self._sync_kraken,
+                ("POST", "/sync/evm"): self._sync_evm,
+                ("POST", "/sync/solana"): self._sync_solana,
+                ("POST", "/sync/kucoin"): self._sync_kucoin,
+                ("POST", "/sync/coinbase"): self._sync_coinbase,
+                ("POST", "/sync/revolut"): self._sync_revolut,
                 ("GET", "/config"): self._config,
                 ("GET", "/about"): self._about,
             }
@@ -719,7 +732,13 @@ def _handler_for(  # pylint: disable=too-many-statements
             )
 
         def _sync(self) -> None:
-            self._page("sync.html", "Sync", section="sync", secrets=secrets_present(desk))
+            self._page(
+                "sync.html",
+                "Sync",
+                section="sync",
+                secrets=secrets_present(desk),
+                extra=extra_status(desk),
+            )
 
         def _sync_ethereum(self) -> None:
             import_ethereum(
@@ -732,6 +751,44 @@ def _handler_for(  # pylint: disable=too-many-statements
                 desk, self._req.form.get("api_key", ""), self._req.form.get("api_secret", "")
             )
             self._redirect("/transactions?imported=kraken")
+
+        def _sync_evm(self) -> None:
+            form = self._req.form
+            import_evm(
+                desk,
+                form.get("address", ""),
+                form.get("chain", "base"),
+                form.get("api_key", ""),
+                form.get("explorer_url", ""),
+                form.get("chain_id", ""),
+                form.get("symbol", ""),
+            )
+            self._redirect("/transactions?imported=evm")
+
+        def _sync_solana(self) -> None:
+            form = self._req.form
+            import_solana(desk, form.get("address", ""), form.get("rpc_url", ""))
+            self._redirect("/transactions?imported=solana")
+
+        def _sync_kucoin(self) -> None:
+            form = self._req.form
+            import_kucoin(
+                desk,
+                form.get("api_key", ""),
+                form.get("api_secret", ""),
+                form.get("passphrase", ""),
+            )
+            self._redirect("/transactions?imported=kucoin")
+
+        def _sync_coinbase(self) -> None:
+            form = self._req.form
+            import_coinbase(desk, form.get("api_key", ""), form.get("api_secret", ""))
+            self._redirect("/transactions?imported=coinbase")
+
+        def _sync_revolut(self) -> None:
+            filename, payload = _uploaded_file(self.headers.get("Content-Type", ""), self._req.raw)
+            import_revolut_csv(desk, filename, payload)
+            self._redirect("/transactions?imported=revolut")
 
         def _report_csv(self, query: Mapping[str, List[str]]) -> None:
             year = _year(_field(query, "tax_year"))
