@@ -76,6 +76,24 @@ def list_rule_years() -> List[Dict[str, Any]]:
     return years
 
 
+def defi_tags() -> List[Dict[str, str]]:
+    """Tag catalogue. The same ids are recorded for each year that has a file."""
+    found: Dict[str, Dict[str, str]] = {}
+    for year in list_rule_years():
+        rules = year.get("rules") or {}
+        for tag in rules.get("defi", {}).get("tags", []):
+            if not isinstance(tag, dict) or not tag.get("id"):
+                continue
+            found[str(tag["id"])] = {
+                "id": str(tag["id"]),
+                "label": str(tag.get("label") or tag["id"]),
+                "note": str(tag.get("note") or "").strip(),
+                "effect": str(tag.get("effect") or ""),
+                "manual": str(tag.get("manual") or ""),
+            }
+    return list(found.values())
+
+
 def accountant_review_items(ending_year: int) -> List[Dict[str, str]]:
     """Items the config marks for an accountant. Nothing here is applied."""
     items: List[Dict[str, str]] = []

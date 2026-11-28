@@ -29,6 +29,7 @@ from .convert import (
 from .engine_run import report_csv, run_tax_year
 from .errors import DeskError
 from .health import analyse
+from .rules import defi_tags
 
 PAGE_SIZE = 50
 _SPECIAL = {NEEDS_REVIEW, POSSIBLE_SPAM, IGNORED}
@@ -148,10 +149,22 @@ class Desk:
             if row["id"] == row_id:
                 row["log"] = [item for item in self.change_log() if item["row_id"] == row_id]
                 row["allowed_types"] = allowed_types()
+                catalog = defi_tags()
+                row["defi_tags"] = catalog
+                chosen = ""
+                for item in row["log"]:
+                    if item.get("tag"):
+                        chosen = str(item["tag"])
+                row["tag"] = chosen
+                row["tag_note"] = next(
+                    (item["note"] for item in catalog if item["id"] == chosen), ""
+                )
                 return row
         raise DeskError("That transaction is not in the ledger.")
 
-    def reclassify(self, row_id: str, new_type: str, why: str, actor: str) -> Dict[str, str]:
+    def reclassify(
+        self, row_id: str, new_type: str, why: str, actor: str, tag: str = ""
+    ) -> Dict[str, str]:
         cleaned = why.strip()
         if not cleaned:
             raise DeskError("Say why this type should change.")
@@ -159,11 +172,17 @@ class Desk:
             raise DeskError("Choose a BittyTax transaction type.")
         if len(cleaned) > 500:
             raise DeskError("The reason is too long.")
+        chosen = tag.strip()
+        known = {item["id"] for item in defi_tags()}
+        if chosen and chosen not in known:
+            raise DeskError("Choose a DeFi tag from the rule file.")
         with self._lock:
             current = self.transaction(row_id)
             before = str(current["type"])
-            if before == new_type:
+            if before == new_type and not chosen:
                 raise DeskError("That row already has this type.")
+            if before == new_type and chosen == str(current.get("tag", "")):
+                raise DeskError("That row already has this tag.")
             entry = {
                 "row_id": row_id,
                 "at": _stamp(),
@@ -171,6 +190,7 @@ class Desk:
                 "why": cleaned,
                 "before_type": before,
                 "after_type": new_type,
+                "tag": chosen,
             }
             with (self.root / "reclassifications.jsonl").open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(entry, ensure_ascii=True, sort_keys=True) + "\n")

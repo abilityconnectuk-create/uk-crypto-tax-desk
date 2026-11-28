@@ -290,7 +290,13 @@ def _handler_for(  # pylint: disable=too-many-statements
                     host=self._req.host_name,
                     session_user=self._req.session.user,
                 )
-                desk.reclassify(row_id, _form_value(form, "type"), _form_value(form, "why"), actor)
+                desk.reclassify(
+                    row_id,
+                    _form_value(form, "type"),
+                    _form_value(form, "why"),
+                    actor,
+                    _form_value(form, "tag"),
+                )
             except DeskError as exc:
                 self._transaction(row_id, str(exc))
                 return
