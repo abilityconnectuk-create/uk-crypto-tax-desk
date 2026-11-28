@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block body %}
+    <h1>Report pack {{ report.label }}</h1>
+    <p class="lede">Summary, SA108 figures, disposals, income, the transaction list, and the data-health warnings for this year. This is the calculator's output. It is not tax advice.</p>
+    {% if pdf_note %}
+        <p class="warn">{{ pdf_note }}</p>
+    {% endif %}
+    <h2>Summary</h2>
+    <table>
+        <tbody>
+            <tr>
+                <th>Number of disposals</th>
+                <td>{{ report.summary.disposals }}</td>
+            </tr>
+            <tr>
+                <th>Disposal proceeds</th>
+                <td>{{ report.summary.proceeds | gbp }}</td>
+            </tr>
+            <tr>
+                <th>Allowable costs</th>
+                <td>{{ report.summary.allowable_costs | gbp }}</td>
+            </tr>
+            <tr>
+                <th>Gains before losses</th>
+                <td>{{ report.summary.total_gain | gbp }}</td>
+            </tr>
+            <tr>
+                <th>Losses</th>
+                <td>{{ report.summary.losses | gbp }}</td>
+            </tr>
+        </tbody>
+    </table>
+    <h2>SA108</h2>
+    {% if sa108 %}
+        {% if sa108.banner %}
+            <p class="banner">{{ sa108.banner }}</p>
+        {% endif %}
+        <table>
+            <tbody>
+                {% for box in sa108.boxes %}
+                    <tr>
+                        <th>Box {{ box.box }} {{ box.label }}</th>
+                        <td>
+                            {% if box.value %}
+                                {% if box.key == "disposals" %}
+                                    {{ box.value }}
+                                {% else %}
+                                    {{ box.value | gbp }}
+                                {% endif %}
+                            {% else %}
+                                Accountant review
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <p>Annual exempt amount {{ sa108.allowance.value | gbp }}. It is not deducted above.</p>
+    {% else %}
+        <p>No SA108 mapping for this year.</p>
+    {% endif %}
+    <h2>Disposals</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Asset</th>
+                <th>Date</th>
+                <th>Quantity</th>
+                <th>Proceeds</th>
+                <th>Gain</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in report.disposals %}
+                <tr>
+                    <td>{{ row.asset }}</td>
+                    <td>{{ row.date }}</td>
+                    <td>{{ row.quantity }}</td>
+                    <td>{{ row.proceeds | gbp }}</td>
+                    <td>{{ row.gain | gbp }}</td>
+                </tr>
+            {% else %}
+                <tr>
+                    <td colspan="5">No disposals in this year.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <h2>Income</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Type</th>
+                <th>Amount</th>
+                <th>Fees</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in report.income.types %}
+                <tr>
+                    <td>{{ row.type }}</td>
+                    <td>{{ row.amount | gbp }}</td>
+                    <td>{{ row.fees | gbp }}</td>
+                </tr>
+            {% else %}
+                <tr>
+                    <td colspan="3">No income in this year.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <h2>Transactions</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Type</th>
+                <th>Assets</th>
+                <th>Wallet</th>
+                <th>Note</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in transactions %}
+                <tr>
+                    <td>{{ row.date }}</td>
+                    <td>{{ row.type }}</td>
+                    <td>{{ row.assets | join(", ") }}</td>
+                    <td>{{ row.wallet }}</td>
+                    <td>{{ row.note }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <h2>Data health</h2>
+    {% if health.issues %}
+        <ul>
+            {% for issue in health.issues %}
+                <li>{{ issue.category }}: {{ issue.summary }}</li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>No data-health warnings.</p>
+    {% endif %}
+    <h2>Accountant review</h2>
+    <p class="banner">AWAITING TAX REVIEW</p>
+    {% if accountant_review %}
+        <ul>
+            {% for item in accountant_review %}
+                <li>
+                    <strong>{{ item.title }}</strong> — {{ item.detail }}
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>No accountant-review items for this year.</p>
+    {% endif %}
+{% endblock %}

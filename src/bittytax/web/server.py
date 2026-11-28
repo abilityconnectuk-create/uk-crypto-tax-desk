@@ -33,6 +33,7 @@ from .config_view import config_snapshot
 from .engine_run import supported_years
 from .errors import DeskError
 from .identity import LOOPBACK, actor_for, trusted_tailscale_user
+from .pack import pack_context, pack_lines, render_pdf
 from .rules import accountant_review_items
 from .sa108 import sa108_view
 from .store import Desk
@@ -92,7 +93,9 @@ class _Request:  # pylint: disable=too-few-public-methods
         self.host_name = ""
 
 
-def _handler_for(desk: Desk, desk_auth: DeskAuth, bind_host: str) -> type:
+def _handler_for(  # pylint: disable=too-many-statements
+    desk: Desk, desk_auth: DeskAuth, bind_host: str
+) -> type:
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         _req: _Request
@@ -211,6 +214,8 @@ def _handler_for(desk: Desk, desk_auth: DeskAuth, bind_host: str) -> type:
                 ("GET", "/review"): lambda: self._review(query),
                 ("GET", "/health"): lambda: self._health(query),
                 ("GET", "/report"): lambda: self._report(query),
+                ("GET", "/report/pack"): lambda: self._pack(query, pdf=False),
+                ("GET", "/report/pack.pdf"): lambda: self._pack(query, pdf=True),
                 ("GET", "/report.csv"): lambda: self._report_csv(query),
                 ("GET", "/config"): self._config,
                 ("GET", "/about"): self._about,
@@ -355,6 +360,16 @@ def _handler_for(desk: Desk, desk_auth: DeskAuth, bind_host: str) -> type:
                 records_path=str(desk.records_path),
                 error="",
             )
+
+        def _pack(self, query: Mapping[str, List[str]], pdf: bool) -> None:
+            year = _year(_field(query, "tax_year"))
+            context = pack_context(desk, year)
+            if pdf:
+                body = render_pdf(pack_lines(context))
+                if body is not None:
+                    self._send(200, body, "application/pdf", f"bittytax-{year}-pack.pdf")
+                    return
+            self._page("pack.html", "Report pack", section="report", **context)
 
         def _report_csv(self, query: Mapping[str, List[str]]) -> None:
             year = _year(_field(query, "tax_year"))

@@ -133,3 +133,8 @@ code { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; 
   main { padding: 1rem; }
   table { display: block; overflow-x: auto; }
 }
+@media print {
+  .top, footer, form { display: none; }
+  body { background: white; }
+  main { max-width: none; }
+}
