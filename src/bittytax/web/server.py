@@ -35,6 +35,7 @@ from .config_view import config_snapshot
 from .convert import allowed_types
 from .cost_basis import trace_rows
 from .dashboard import tax_year_containing
+from .defi_apply import pending_preview
 from .engine_run import supported_years
 from .errors import DeskError
 from .events import append_event
@@ -266,6 +267,7 @@ def _handler_for(  # pylint: disable=too-many-statements
                 ("POST", "/plan"): self._plan_post,
                 ("GET", "/matches"): self._matches,
                 ("GET", "/cost"): self._cost,
+                ("GET", "/defi"): lambda: self._defi(query),
                 ("POST", "/matches/run"): self._matches_run,
                 ("POST", "/matches/decide"): self._matches_decide,
                 ("POST", "/matches/settings"): self._matches_settings,
@@ -693,6 +695,15 @@ def _handler_for(  # pylint: disable=too-many-statements
 
         def _matches(self) -> None:
             self._page("matches.html", "Matches", section="matches", view=match_view(desk))
+
+        def _defi(self, query: Mapping[str, List[str]]) -> None:
+            year = _year(_field(query, "tax_year"))
+            self._page(
+                "defi.html",
+                "DeFi",
+                section="defi",
+                view={"rows": pending_preview(desk, year), "year": year},
+            )
 
         def _cost(self) -> None:
             rows = desk.all_rows()

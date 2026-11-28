@@ -381,14 +381,26 @@ class Desk:
     def report(self, tax_year: int) -> Dict[str, Any]:
         with self._lock:
             self._write_effective_unlocked()
-            digest = hashlib.sha256(self.records_path.read_bytes()).hexdigest()
+            source = self._tax_source_unlocked()
+            digest = hashlib.sha256(source.read_bytes()).hexdigest()
         cache = self.root / "report-cache" / f"{tax_year}-{digest}.json"
         if cache.is_file():
             return json.loads(cache.read_text(encoding="utf-8"))
-        report = run_tax_year(str(self.records_path), tax_year)
+        report = run_tax_year(str(source), tax_year)
         cache.parent.mkdir(parents=True, exist_ok=True)
         _write_json(cache, report)
         return report
+
+    def _tax_source_unlocked(self) -> Path:
+        """Calculator file. A confirmed DeFi tag can change a type. An unconfirmed tag cannot."""
+        from .defi_apply import any_rewritten, tax_csv  # pylint: disable=import-outside-toplevel
+
+        rows = self._effective_rows()
+        if not any_rewritten(rows):
+            return self.records_path
+        path = self.root / "tax-records.csv"
+        path.write_text(tax_csv(rows, bittytax_header()), encoding="utf-8")
+        return path
 
     def report_csv(self, tax_year: int) -> str:
         return report_csv(self.report(tax_year))

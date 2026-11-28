@@ -78,6 +78,10 @@
                         {{ ui.icon("report") }}
                         <span class="nav-label">Cost basis</span>
                     </a>
+                    <a href="/defi" {% if section == "defi" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("report") }}
+                        <span class="nav-label">DeFi</span>
+                    </a>
                     <a href="/review"
                        {% if section == "review" %}aria-current="page"{% endif %}>
                         {{ ui.icon("list") }}
