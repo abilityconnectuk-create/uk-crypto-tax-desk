@@ -33,8 +33,8 @@
                         {{ ui.icon("report") }}
                         <span class="nav-label">Tax reports</span>
                     </a>
-                    <a href="/import"
-                       {% if section == "import" or section == "import-add" %}aria-current="page"{% endif %}>
+                    <a href="/wallets"
+                       {% if section == "wallets" %}aria-current="page"{% endif %}>
                         {{ ui.icon("wallet") }}
                         <span class="nav-label">Wallets</span>
                     </a>
@@ -74,6 +74,11 @@
                         <span class="nav-label">Settings</span>
                     </a>
                     <p class="more-label">More</p>
+                    <a href="/import"
+                       {% if section == "import" or section == "import-add" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("list") }}
+                        <span class="nav-label">Imports</span>
+                    </a>
                     <a href="/rules"
                        {% if section == "rules" %}aria-current="page"{% endif %}>
                         {{ ui.icon("settings") }}

@@ -1,0 +1,41 @@
+# Suggested tags for synced contract calls. Fork of BittyTax (AGPL-3.0). See LICENSE.
+# confirmed is false. A suggestion is a hint for review. It does not change a tax result.
+confirmed: false
+note: Suggested tags for bridge, Morpho, liquidity-pool and vault calls. None are confirmed.
+suggestions:
+  bridge:
+    tag: swap
+    label: Bridge
+    confirmed: false
+  morpho:
+    tag: lending_interest
+    label: Morpho
+    confirmed: false
+  lp:
+    tag: liquidity_in
+    label: Liquidity pool
+    confirmed: false
+  vault:
+    tag: pool_in
+    label: Vault
+    confirmed: false
+contracts:
+  - address: "0x00000000000000000000000000000000000000b1"
+    kind: bridge
+  - address: "0x00000000000000000000000000000000000000e1"
+    kind: morpho
+  - address: "0x00000000000000000000000000000000000000d2"
+    kind: lp
+  - address: "0x00000000000000000000000000000000000000e2"
+    kind: vault
+words:
+  bridge: bridge
+  morpho: morpho
+  vault: vault
+  liquidity: lp
+chains:
+  robinhood:
+    chain_id: "4663"
+    explorer_url: ""
+    rpc_url: ""
+    note: Robinhood Chain is an Arbitrum Nitro layer 2. Set the explorer or RPC URL.

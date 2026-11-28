@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block body %}
+    <div class="page-head">
+        <div>
+            <h1>Wallets</h1>
+            <p class="lede">
+                Sorted by date added, newest first.
+                API keys must be READ-ONLY. A key that can trade or withdraw is refused.
+                Keys stay on this computer and are not shown again.
+                Synced rows wait on Review until you accept them. Nothing is written to Koinly.
+            </p>
+        </div>
+        <div class="actions">
+            <form method="post" action="/wallets/sync-all">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <button type="submit">Sync all</button>
+            </form>
+            <a class="btn primary" href="/wallets/add">Add</a>
+        </div>
+    </div>
+    {% if listing.rows %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Wallet</th>
+                    <th>Value</th>
+                    <th>Transaction count</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in listing.rows %}
+                    <tr id="wallet-{{ row.id }}">
+                        <td>{{ row.name }}</td>
+                        <td>{{ row.value }}</td>
+                        <td>{{ row.count }}</td>
+                        <td>
+                            {{ row.status }}
+                            {% if row.synced_at %}
+                                <span class="fine">{{ row.synced_at }}</span>
+                            {% endif %}
+                            {% if row.error %}<span class="warn">{{ row.error }}</span>{% endif %}
+                            {% if row.notice %}<span class="fine">{{ row.notice }}</span>{% endif %}
+                            {% if row.warning %}<span class="warn">{{ row.warning }}</span>{% endif %}
+                        </td>
+                        <td>
+                            <form method="post" action="/wallets/sync">
+                                <input type="hidden" name="csrf" value="{{ csrf }}">
+                                <input type="hidden" name="wallet_id" value="{{ row.id }}">
+                                <button type="submit">Sync</button>
+                            </form>
+                            <a href="/wallets/reconnect?wallet={{ row.id }}">Reconnect</a>
+                            <a href="/wallets/import?wallet={{ row.id }}">Import file</a>
+                            <a href="/wallets/delete?wallet={{ row.id }}">Delete</a>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>No wallets yet.</p>
+    {% endif %}
+    <div class="card">
+        <div class="pager">
+            <p>{{ listing.total }} wallets</p>
+            <form method="get" action="/wallets">
+                <label>
+                    Per page
+                    <select name="per" aria-label="Rows per page">
+                        {% for size in listing.sizes %}
+                            <option value="{{ size }}"
+                                    {% if listing.per_page == size %}selected{% endif %}>{{ size }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <button type="submit" class="ghost">Show</button>
+            </form>
+            <p class="pager">
+                {% if listing.page > 1 %}
+                    <a href="/wallets?per={{ listing.per_page }}&amp;page={{ listing.page - 1 }}">Previous</a>
+                {% endif %}
+                <span>Page {{ listing.page }} of {{ listing.pages }}</span>
+                {% if listing.page < listing.pages %}
+                    <a href="/wallets?per={{ listing.per_page }}&amp;page={{ listing.page + 1 }}">Next</a>
+                {% endif %}
+            </p>
+        </div>
+    </div>
+    <h2>Missed by Koinly</h2>
+    <p>Rows from a sync that are not already in the Koinly import. They enter the tax report only when you accept them.</p>
+    {% if listing.missed %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Asset</th>
+                    <th>Quantity</th>
+                    <th>Wallet</th>
+                    <th>Detail</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in listing.missed %}
+                    <tr id="missed-{{ row.id }}">
+                        <td>{{ row.timestamp }}</td>
+                        <td>{{ row.asset }}</td>
+                        <td>{{ row.quantity }}</td>
+                        <td>{{ row.wallet }}</td>
+                        <td>
+                            {{ row.description }}
+                            {% if row.suggested_tag %}
+                                <span class="fine">Suggested tag {{ row.suggested_tag }}. Not confirmed.</span>
+                            {% endif %}
+                            <form method="post" action="/wallets/accept">
+                                <input type="hidden" name="csrf" value="{{ csrf }}">
+                                <input type="hidden" name="row_id" value="{{ row.id }}">
+                                <input type="hidden" name="next" value="/wallets">
+                                <button type="submit">Add to the tax report</button>
+                            </form>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>None.</p>
+    {% endif %}
+{% endblock %}

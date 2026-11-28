@@ -110,6 +110,8 @@ venv.bak/
 
 # Local desk data and wallet registers. Do not commit real records or addresses.
 .uk-crypto-tax-desk/
+# API keys and explorer keys. The desk stores these only under the data directory.
+secrets/
 **/.uk-crypto-tax-desk/
 wallets.yaml
 desk-password.json

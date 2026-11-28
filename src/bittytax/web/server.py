@@ -65,7 +65,6 @@ from .matching import apply_auto_matches, decide, match_view, save_settings
 from .pack import pack_context, pack_lines, render_pdf
 from .planning import hypothetical, plan_view
 from .present import (
-    ago,
     avatar_slot,
     build_home,
     guided_steps,
@@ -119,6 +118,10 @@ from .user_rules import (
     save_rule,
     set_enabled,
 )
+from .wallet_http import accept_posted
+from .wallet_http import handle as wallets_handle
+from .wallets_desk import review_items as wallet_review
+from .when import ago
 from .year_end import dismiss_year_end
 
 _STATIC = Path(__file__).resolve().parent / "static"
@@ -389,6 +392,10 @@ def _handler_for(  # pylint: disable=too-many-statements
                 self._login_post()
             elif path == "/logout" and method == "POST":
                 self._logout()
+            elif path == "/review/wallet" and method == "POST":
+                accept_posted(self, desk)
+            elif path.startswith("/wallets"):
+                wallets_handle(self, desk, method, path)
             elif problem and method == "GET":
                 self._import_problem(problem.group(1))
             else:
@@ -607,7 +614,11 @@ def _handler_for(  # pylint: disable=too-many-statements
         def _review(self, query: Mapping[str, List[str]]) -> None:
             year = _year(_field(query, "tax_year"))
             review = desk.review(year)
-            review["queue"] = exchange_review(desk, year) + list(review.get("queue") or [])
+            review["queue"] = (
+                exchange_review(desk, year)
+                + wallet_review(desk, year)
+                + list(review.get("queue") or [])
+            )
             self._page(
                 "review.html",
                 "Review",
@@ -1234,6 +1245,7 @@ def _year_action(path: str) -> str:
         "/missing-cost",
         "/matches",
         "/queues",
+        "/wallets",
     }
     if path in kept:
         return path
