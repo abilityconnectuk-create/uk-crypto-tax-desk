@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block body %}
+    <div class="page-head">
+        <div>
+            <h1>Audit trail</h1>
+            <p class="lede">
+                Imports, matches, rules, and bulk changes are listed with who made them and when.
+                The latest label change on a row can be undone. Encrypted backups stay on this computer.
+            </p>
+        </div>
+        <form method="post" action="/audit/backup">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button type="submit" class="btn primary">Back up now</button>
+        </form>
+    </div>
+    <section class="card pad">
+        <h2>Backups</h2>
+        <p>
+            The key is <code>backup.key</code> in the data directory, mode 0600, and it is not inside the archive.
+            If <code>BITTYTAX_DESK_PASSWORD</code> is set, the key is derived from that password.
+            The saved desk password is only a hash, so it cannot unlock a backup on its own.
+        </p>
+        <form method="post" action="/audit/retention" class="filters">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <label>
+                Copies to keep
+                <input name="count" value="{{ view.retention }}">
+            </label>
+            <button type="submit" class="ghost">Save</button>
+        </form>
+        {% for item in view.backups %}
+            <form method="post" action="/audit/restore">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <input type="hidden" name="name" value="{{ item.name }}">
+                <span>{{ item.name }} ({{ item.bytes }} bytes)</span>
+                <button type="submit">Restore</button>
+            </form>
+        {% else %}
+            <p>No backup yet.</p>
+        {% endfor %}
+    </section>
+    <section class="card pad">
+        <h2>Latest label change</h2>
+        {% for change in view.changes %}
+            <form method="post" action="/audit/undo">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <input type="hidden" name="row_id" value="{{ change.row_id }}">
+                <span>{{ change.at }} {{ change.who }} {{ change.before_type }} to {{ change.after_type }}</span>
+                <button type="submit">Undo</button>
+            </form>
+        {% else %}
+            <p>No label change to undo.</p>
+        {% endfor %}
+    </section>
+    <section class="card pad">
+        <h2>History</h2>
+        {% for event in view.events %}
+            <p>{{ event.at }} {{ event.who }} {{ event.kind }} — {{ event.summary }}</p>
+        {% else %}
+            <p>No changes yet.</p>
+        {% endfor %}
+    </section>
+{% endblock body %}

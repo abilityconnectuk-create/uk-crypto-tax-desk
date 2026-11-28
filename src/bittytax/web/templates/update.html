@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block body %}
+    <div class="page-head">
+        <div>
+            <h1>Update desk</h1>
+            <p class="lede">
+                This updates the current branch with a fast-forward only, then reinstalls it.
+                It does not switch branch and it does not merge. Restart the desk afterwards.
+            </p>
+        </div>
+    </div>
+    {% if error %}<p class="warn">{{ error }}</p>{% endif %}
+    {% if message %}<p class="banner">{{ message }}</p>{% endif %}
+    {% if view.is_repo == "yes" %}
+        <section class="card pad">
+            <p>Branch {{ view.branch }}</p>
+            <p>Commit {{ view.commit }}</p>
+            <form method="post" action="/update">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <button type="submit" class="btn primary">Update desk</button>
+            </form>
+        </section>
+    {% else %}
+        <section class="card pad">
+            <p>{{ view.note }}</p>
+        </section>
+    {% endif %}
+{% endblock body %}

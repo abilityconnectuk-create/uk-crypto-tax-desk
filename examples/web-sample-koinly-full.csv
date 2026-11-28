@@ -1,0 +1,10 @@
+Date,Type,Tag,Sending Wallet,Sent Amount,Sent Currency,Sent Cost Basis,Receiving Wallet,Received Amount,Received Currency,Received Cost Basis,Fee Amount,Fee Currency,Gain (GBP),Net Value (GBP),Fee Value (GBP),TxSrc,TxDest,TxHash,Description
+2025-05-01 12:00:00,crypto_deposit,staking,,,,,Sample Wallet,0.1,ETH,,,,,200,,,,sample-tx-k1,made up staking reward
+2025-05-02 12:00:00,crypto_deposit,airdrop,,,,,Sample Wallet,50,DOGE,,,,,5,,,,sample-tx-k2,made up airdrop
+2025-05-03 12:00:00,crypto_deposit,lending interest,,,,,Sample Wallet,10,USDC,,,,,8,,,,sample-tx-k3,made up lending interest
+2025-05-04 12:00:00,crypto_withdrawal,cost,Sample Wallet,0.01,BTC,,,,,,,,,,400,,,sample-tx-k4,made up cost
+2025-05-05 12:00:00,crypto_withdrawal,gift,Sample Wallet,0.02,ETH,,,,,,,,,,40,,,sample-tx-k5,made up gift
+2025-05-06 12:00:00,crypto_withdrawal,lost,Sample Wallet,1,DOGE,,,,,,,,,,1,,,sample-tx-k6,made up lost coin
+2025-05-07 12:00:00,transfer,internal transfer,Sample Wallet A,0.5,ETH,,Sample Wallet B,0.5,ETH,,,,,,,,,sample-tx-k7,made up internal transfer
+2025-05-08 12:00:00,exchange,swap,Sample Wallet,100,USDC,,Sample Wallet,0.05,ETH,,,,,80,,,,sample-tx-k8,made up swap
+2025-05-09 12:00:00,crypto_deposit,mystery prize,,,,,Sample Wallet,3,DOGE,,,,,1,,,,sample-tx-k9,made up unknown label

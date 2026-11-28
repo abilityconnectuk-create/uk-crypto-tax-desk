@@ -18,6 +18,7 @@ from .dashboard import dashboard, tax_year_containing
 from .errors import DeskError
 from .prices import latest_unit_prices
 from .store import Desk
+from .year_end import year_end_card
 
 _PENCE = Decimal("0.01")
 _SPANS = ("1m", "1y", "ytd", "tax", "all")
@@ -92,14 +93,24 @@ def import_summary(entry: Mapping[str, Any]) -> Dict[str, Any]:
     """Rows kept, rows skipped, and warnings for one stored import."""
     source_rows = int(entry.get("row_count") or 0)
     converted = int(entry.get("converted_rows") or 0)
+    raw_report = entry.get("report")
+    report: Dict[str, Any] = raw_report if isinstance(raw_report, dict) else {}
+    skipped_reasons = list(report.get("skipped_reasons") or [])
     return {
         "id": str(entry.get("id") or ""),
         "filename": str(entry.get("filename") or ""),
         "format": str(entry.get("format") or ""),
         "imported_rows": converted,
-        "skipped": max(0, source_rows - converted),
+        "skipped": max(len(skipped_reasons), source_rows - converted, 0),
         "warnings": int(entry.get("unmapped_rows") or 0),
         "imported_at": str(entry.get("imported_at") or ""),
+        "idempotent": bool(entry.get("idempotent")),
+        "unknown_columns": list(report.get("unknown_columns") or []),
+        "date_problems": list(report.get("date_problems") or []),
+        "number_problems": list(report.get("number_problems") or []),
+        "skipped_reasons": skipped_reasons,
+        "duplicates": list(report.get("duplicates") or []),
+        "normalised": list(report.get("normalised") or []),
     }
 
 
@@ -199,6 +210,7 @@ def build_home(
         "steps": guided_steps(desk.counts(), health_total),
         "health_total": health_total,
         "health": health,
+        "year_end": year_end_card(desk, moment),
     }
 
 

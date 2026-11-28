@@ -589,6 +589,16 @@ td:nth-child(n+3), th:nth-child(n+3) { font-variant-numeric: tabular-nums; }
 code { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 0.88em; }
 
 .tx-list { display: flex; flex-direction: column; overflow: hidden; }
+.tx-select {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.tx-select .tx-row { flex: 1; border-bottom: 0; }
+.tick { padding-left: 0.75rem; }
+
 .tx-row {
   display: grid;
   grid-template-columns: minmax(9rem, 1.2fr) minmax(8rem, 1fr) minmax(8rem, 1.1fr);

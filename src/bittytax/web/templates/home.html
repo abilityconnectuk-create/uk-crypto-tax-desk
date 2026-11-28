@@ -66,6 +66,28 @@
         </div>
     </section>
     <p class="banner">{{ view.banner }}</p>
+    {% if view.year_end %}
+        <section class="card pad">
+            <h2>Before 5 April</h2>
+            <p>{{ view.year_end.note }}</p>
+            <p>Annual exempt amount remaining: {{ view.year_end.allowance_remaining }}.</p>
+            <p>Losses available: {{ view.year_end.losses_available }}.</p>
+            {% if view.year_end.unrealised %}
+                <ul>
+                    {% for item in view.year_end.unrealised %}
+                        <li>{{ item.asset }} unrealised {{ item.amount }}</li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p>No unrealised loss is shown from the cached prices.</p>
+            {% endif %}
+            <p class="banner">{{ view.year_end.banner }}</p>
+            <form method="post" action="/year-end/dismiss">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <button type="submit" class="ghost">Dismiss</button>
+            </form>
+        </section>
+    {% endif %}
     <div class="grid-3">
         <section class="card pad">
             <h2>Allocation</h2>

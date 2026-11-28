@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block body %}
+    <div class="page-head">
+        <div>
+            <h1>Parser problem</h1>
+            <p class="lede">The failing row is shown as a pattern. Amounts, addresses and notes are not shown.</p>
+        </div>
+        <a class="btn" href="/import">Back to wallets</a>
+    </div>
+    {% if problem %}
+        <section class="card pad">
+            <p>{{ problem.message }}</p>
+            <p>
+                File
+                <strong>{{ problem.filename }}</strong>
+            </p>
+            {% if problem.header %}
+                <h2>Columns</h2>
+                <p>{{ problem.header|join(", ") }}</p>
+            {% endif %}
+            {% if problem.unknown_columns %}
+                <h2>Unknown columns</h2>
+                <ul>
+                    {% for name in problem.unknown_columns %}<li>{{ name }}</li>{% endfor %}
+                </ul>
+            {% endif %}
+            <h2>Failing row pattern</h2>
+            <ol>
+                {% for cell in problem.pattern %}
+                    <li>
+                        <code>{{ cell }}</code>
+                    </li>
+                {% endfor %}
+            </ol>
+            {% if problem.date_problems %}
+                <h2>Date formats</h2>
+                <ul>
+                    {% for item in problem.date_problems %}
+                        <li>{{ item.reason }} <code>{{ item.pattern }}</code></li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+            {% if problem.number_problems %}
+                <h2>Number formats</h2>
+                <ul>
+                    {% for item in problem.number_problems %}
+                        <li>{{ item.reason }} <code>{{ item.pattern }}</code></li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+            {% if problem.skipped_reasons %}
+                <h2>Skipped</h2>
+                <ul>
+                    {% for item in problem.skipped_reasons %}<li>Line {{ item.row }}: {{ item.reason }}</li>{% endfor %}
+                </ul>
+            {% endif %}
+        </section>
+    {% else %}
+        <p class="warn">That parser problem is not on this desk.</p>
+    {% endif %}
+{% endblock %}

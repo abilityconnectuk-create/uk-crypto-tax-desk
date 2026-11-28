@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block body %}
+    <div class="page-head">
+        <div>
+            <h1>Rules</h1>
+            <p class="lede">
+                When a wallet, asset, description or type matches, set a type or a tag. A rule is applied on the next import and can be run again. This relabels rows. It is not a tax rule.
+            </p>
+        </div>
+    </div>
+    <section class="card pad">
+        <h2>New rule</h2>
+        <form method="post" action="/rules" class="filters">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <label>
+                When
+                <select name="field">
+                    <option value="wallet">Wallet</option>
+                    <option value="asset">Asset</option>
+                    <option value="description">Description</option>
+                    <option value="type">Type</option>
+                </select>
+            </label>
+            <label>
+                Matches
+                <input name="match" required>
+            </label>
+            <label>
+                Set type
+                <select name="set_type">
+                    <option value="">Leave type</option>
+                    {% for kind in kinds %}
+                        <option value="{{ kind }}">{{ kind }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Set tag
+                <input name="set_tag" placeholder="DeFi tag id">
+            </label>
+            <button type="submit" class="btn primary">Save and preview</button>
+        </form>
+    </section>
+    <section class="card pad">
+        <h2>Saved rules</h2>
+        {% for rule in rules %}
+            <article>
+                <p>
+                    When {{ rule.field }} matches <strong>{{ rule.match }}</strong>,
+                    set {{ rule.set_type or "the same type" }}
+                    {% if rule.set_tag %}and tag {{ rule.set_tag }}{% endif %}.
+                    {{ "On" if rule.enabled == "yes" else "Off" }}.
+                </p>
+                <p>
+                    <a href="/rules?preview={{ rule.id }}">Preview</a>
+                </p>
+                <form method="post" action="/rules/apply">
+                    <input type="hidden" name="csrf" value="{{ csrf }}">
+                    <input type="hidden" name="rule_id" value="{{ rule.id }}">
+                    <button type="submit">Apply enabled rules</button>
+                </form>
+                <form method="post" action="/rules/toggle">
+                    <input type="hidden" name="csrf" value="{{ csrf }}">
+                    <input type="hidden" name="rule_id" value="{{ rule.id }}">
+                    {% if rule.enabled == "yes" %}
+                        <input type="hidden" name="enabled" value="no">
+                        <button type="submit">Turn off</button>
+                    {% else %}
+                        <input type="hidden" name="enabled" value="yes">
+                        <button type="submit">Turn on</button>
+                    {% endif %}
+                </form>
+            </article>
+        {% else %}
+            <p>No rules yet.</p>
+        {% endfor %}
+        {% if preview_id %}
+            <h2>Preview</h2>
+            <p>{{ preview|length }} rows would change. Nothing has been written yet.</p>
+            <ul>
+                {% for row in preview[:20] %}
+                    <li>{{ row.type }} {{ row.asset }} {{ row.wallet }} {{ row.note }}</li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+    </section>
+{% endblock %}

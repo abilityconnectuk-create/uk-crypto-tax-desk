@@ -13,16 +13,9 @@ from .errors import DeskError
 from .prices import latest_unit_prices
 from .rules import parameter
 from .store import Desk
+from .taxyear import tax_year_containing
 
 _PENCE = Decimal("0.01")
-
-
-def tax_year_containing(day: date) -> int:
-    """Ending year of the UK tax year that contains ``day``. 6 April 2026 is 2027."""
-    start = (config.start_of_year_month, config.start_of_year_day)
-    if (day.month, day.day) >= start:
-        return day.year + 1
-    return day.year
 
 
 def dashboard(desk: Desk, today: Optional[date] = None) -> Dict[str, Any]:

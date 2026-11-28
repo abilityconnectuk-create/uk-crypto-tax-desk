@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block body %}
+    <div class="page-head">
+        <div>
+            <h1>Losses</h1>
+            <p class="lede">
+                Brought-forward losses reduce gains down to the annual exempt amount.
+                This year's losses are used first. The boxes stay AWAITING TAX REVIEW.
+            </p>
+        </div>
+    </div>
+    <p class="banner">AWAITING TAX REVIEW</p>
+    {% if error %}<p class="warn">{{ error }}</p>{% endif %}
+    <section class="card pad">
+        <h2>Opening losses</h2>
+        <p>A figure from before the first year in this desk. It is stored on this computer.</p>
+        <form method="post" action="/losses" class="filters">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <label>
+                Tax year ending
+                <input name="year" value="{{ view.opening.year }}">
+            </label>
+            <label>
+                Amount
+                <input name="amount" value="{{ view.opening.amount }}">
+            </label>
+            <button type="submit" class="btn primary">Save</button>
+        </form>
+    </section>
+    {% for row in view.rows %}
+        <section class="card pad">
+            <h2>{{ row.year }}</h2>
+            <p>Gains {{ row.gains }}. Gross losses {{ row.gross_losses }}. Allowance {{ row.allowance }}.</p>
+            <p>SA108 box 45, brought-forward losses used: {{ row.brought_used }}.</p>
+            <p>SA108 box 47, losses carried forward: {{ row.carried }}.</p>
+            <p class="banner">{{ row.banner }}</p>
+        </section>
+    {% else %}
+        <section class="card pad">
+            <p>No tax year yet. Save an opening figure or import a file.</p>
+        </section>
+    {% endfor %}
+{% endblock body %}

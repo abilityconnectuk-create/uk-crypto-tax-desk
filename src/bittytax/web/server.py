@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import re
+import subprocess
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from email import policy
@@ -20,6 +21,7 @@ import jinja2
 
 from ..report import ReportLog
 from . import DEFAULT_TAX_YEAR
+from .accountant_pack import build_zip
 from .auth import (
     DeskAuth,
     Session,
@@ -31,13 +33,28 @@ from .auth import (
     is_tailscale_ip,
     safe_next,
 )
+from .backup import (
+    backup_now,
+    ensure_daily_backup,
+    list_backups,
+    restore_backup,
+    retention_count,
+    save_retention,
+)
 from .config_view import config_snapshot
+from .convert import allowed_types
+from .cost_basis import trace_rows
 from .dashboard import tax_year_containing
+from .defi_apply import pending_preview
 from .engine_run import supported_years
 from .errors import DeskError
+from .events import append_event
 from .glossary import GLOSSARY
 from .identity import LOOPBACK, actor_for, trusted_tailscale_user
+from .import_inspect import find_problem, load_problems
 from .koinly_check import compare_year, load_uploads, store_uploads
+from .losses import for_year, save_opening, schedule
+from .matching import apply_auto_matches, decide, match_view, save_settings
 from .pack import pack_context, pack_lines, render_pdf
 from .planning import hypothetical, plan_view
 from .present import (
@@ -53,11 +70,30 @@ from .prices import fetch_missing, load_misses, missing_slots
 from .rules import accountant_review_items, list_rule_years
 from .sa108 import sa108_view
 from .sources import detect_upload, parser_catalogue
+from .sources_extra import (
+    extra_status,
+    import_coinbase,
+    import_evm,
+    import_kucoin,
+    import_revolut_csv,
+    import_solana,
+)
 from .store import Desk
 from .sync import import_ethereum, import_kraken, secrets_present
+from .updater import describe, repo_root, update_checkout
+from .user_rules import (
+    apply_bulk,
+    apply_enabled_rules,
+    load_rules,
+    preview_rule,
+    save_rule,
+    set_enabled,
+)
+from .year_end import dismiss_year_end
 
 _STATIC = Path(__file__).resolve().parent / "static"
 _ROW_PATH = re.compile(r"^/transactions/([0-9A-Za-zT-]+)/([0-9]+)$")
+_PROBLEM_PATH = re.compile(r"^/import/problems/([0-9a-f]+)$")
 _ENV = jinja2.Environment(
     loader=jinja2.FileSystemLoader(Path(__file__).resolve().parent / "templates"),
     autoescape=jinja2.select_autoescape(["html"]),
@@ -95,6 +131,7 @@ def bind_server(root: Path, port: int, host: str = "127.0.0.1") -> ThreadingHTTP
     """Bind the desk. The host must be this computer, or a Tailscale address."""
     bind_host = canonical_bind_host(host)
     desk = Desk(root)
+    ensure_daily_backup(root)
     desk_auth = DeskAuth(root)
     handler = _handler_for(desk, desk_auth, bind_host)
     ThreadingHTTPServer.allow_reuse_address = True
@@ -208,17 +245,7 @@ def _handler_for(  # pylint: disable=too-many-statements
             parsed = urlparse(self.path)
             path = parsed.path
             query = parse_qs(parsed.query)
-            if path.startswith("/static/"):
-                self._static(path)
-                return
-            if path == "/login" and method == "GET":
-                self._login_get()
-                return
-            if path == "/login" and method == "POST":
-                self._login_post()
-                return
-            if path == "/logout" and method == "POST":
-                self._logout()
+            if self._special(method, path):
                 return
             row = _ROW_PATH.match(path)
             if row and method == "GET":
@@ -229,16 +256,26 @@ def _handler_for(  # pylint: disable=too-many-statements
                 return
             routes = {
                 ("GET", "/"): self._home,
+                ("POST", "/year-end/dismiss"): self._year_end_dismiss,
+                ("GET", "/update"): lambda: self._update("", ""),
+                ("POST", "/update"): self._update_post,
                 ("GET", "/import"): self._import_form,
                 ("GET", "/import/add"): self._import_add,
+                ("GET", "/import/problems"): self._import_problems,
                 ("POST", "/import/detect"): self._import_detect,
                 ("POST", "/import"): self._import_post,
                 ("GET", "/transactions"): lambda: self._transactions(query),
+                ("POST", "/transactions/bulk"): self._bulk,
+                ("GET", "/rules"): lambda: self._rules(query),
+                ("POST", "/rules"): self._rules_add,
+                ("POST", "/rules/apply"): self._rules_apply,
+                ("POST", "/rules/toggle"): self._rules_toggle,
                 ("GET", "/review"): lambda: self._review(query),
                 ("GET", "/health"): lambda: self._health(query),
                 ("GET", "/report"): lambda: self._report(query),
                 ("GET", "/report/pack"): lambda: self._pack(query, pdf=False),
                 ("GET", "/report/pack.pdf"): lambda: self._pack(query, pdf=True),
+                ("GET", "/report/accountant.zip"): lambda: self._accountant(query),
                 ("GET", "/report.csv"): lambda: self._report_csv(query),
                 ("GET", "/koinly"): lambda: self._koinly(query),
                 ("POST", "/koinly"): self._koinly_post,
@@ -246,9 +283,27 @@ def _handler_for(  # pylint: disable=too-many-statements
                 ("POST", "/prices/fetch"): self._prices_fetch,
                 ("GET", "/plan"): lambda: self._plan("", None, {}),
                 ("POST", "/plan"): self._plan_post,
+                ("GET", "/matches"): self._matches,
+                ("GET", "/cost"): self._cost,
+                ("GET", "/defi"): lambda: self._defi(query),
+                ("GET", "/losses"): lambda: self._losses(query),
+                ("POST", "/losses"): self._losses_save,
+                ("GET", "/audit"): self._audit,
+                ("POST", "/audit/undo"): self._audit_undo,
+                ("POST", "/audit/backup"): self._audit_backup,
+                ("POST", "/audit/restore"): self._audit_restore,
+                ("POST", "/audit/retention"): self._audit_retention,
+                ("POST", "/matches/run"): self._matches_run,
+                ("POST", "/matches/decide"): self._matches_decide,
+                ("POST", "/matches/settings"): self._matches_settings,
                 ("GET", "/sync"): self._sync,
                 ("POST", "/sync/ethereum"): self._sync_ethereum,
                 ("POST", "/sync/kraken"): self._sync_kraken,
+                ("POST", "/sync/evm"): self._sync_evm,
+                ("POST", "/sync/solana"): self._sync_solana,
+                ("POST", "/sync/kucoin"): self._sync_kucoin,
+                ("POST", "/sync/coinbase"): self._sync_coinbase,
+                ("POST", "/sync/revolut"): self._sync_revolut,
                 ("GET", "/config"): self._config,
                 ("GET", "/about"): self._about,
             }
@@ -257,6 +312,22 @@ def _handler_for(  # pylint: disable=too-many-statements
                 self._plain(404, "That page is not on this desk.")
                 return
             handler()
+
+        def _special(self, method: str, path: str) -> bool:
+            problem = _PROBLEM_PATH.match(path)
+            if path.startswith("/static/"):
+                self._static(path)
+            elif path == "/login" and method == "GET":
+                self._login_get()
+            elif path == "/login" and method == "POST":
+                self._login_post()
+            elif path == "/logout" and method == "POST":
+                self._logout()
+            elif problem and method == "GET":
+                self._import_problem(problem.group(1))
+            else:
+                return False
+            return True
 
         def _home(self) -> None:
             query = parse_qs(urlparse(self.path).query)
@@ -277,8 +348,35 @@ def _handler_for(  # pylint: disable=too-many-statements
                 tax_year=view["tax_year"],
             )
 
+        def _update(self, error: str, message: str) -> None:
+            self._page(
+                "update.html",
+                "Update",
+                section="update",
+                view=describe(repo_root(), subprocess.run),
+                error=error,
+                message=message,
+            )
+
+        def _update_post(self) -> None:
+            root = repo_root()
+            if root is None:
+                self._update("This checkout is not a git repository.", "")
+                return
+            try:
+                message = update_checkout(root, subprocess.run)
+            except DeskError as exc:
+                self._update(str(exc), "")
+                return
+            self._update("", message)
+
+        def _year_end_dismiss(self) -> None:
+            dismiss_year_end(desk.root, date.today())
+            self._redirect("/")
+
         def _import_form(self) -> None:
-            chosen = _field(parse_qs(urlparse(self.path).query), "imported")
+            query = parse_qs(urlparse(self.path).query)
+            chosen = _field(query, "imported")
             summary = None
             wallets = []
             for item in desk.imports():
@@ -288,6 +386,8 @@ def _handler_for(  # pylint: disable=too-many-statements
                 wallets.append(packed)
                 if item["id"] == chosen:
                     summary = import_summary(item)
+                    if _field(query, "again") == "1":
+                        summary["idempotent"] = True
             self._page(
                 "import.html",
                 "Wallets",
@@ -295,6 +395,23 @@ def _handler_for(  # pylint: disable=too-many-statements
                 summary=summary,
                 wallets=wallets,
                 error="",
+                problems=load_problems(desk.root),
+            )
+
+        def _import_problems(self) -> None:
+            self._page(
+                "import_problems.html",
+                "Parser problems",
+                section="import",
+                problems=load_problems(desk.root),
+            )
+
+        def _import_problem(self, problem_id: str) -> None:
+            self._page(
+                "import_problem.html",
+                "Parser problem",
+                section="import",
+                problem=find_problem(desk.root, problem_id),
             )
 
         def _import_add(self) -> None:
@@ -313,8 +430,21 @@ def _handler_for(  # pylint: disable=too-many-statements
 
         def _import_post(self) -> None:
             filename, payload = _uploaded_file(self.headers.get("Content-Type", ""), self._req.raw)
-            entry = desk.import_bytes(filename, payload)
-            self._redirect(f"/import?imported={quote(entry['id'])}")
+            actor = actor_for(
+                self.headers,
+                self._req.client,
+                host=self._req.host_name,
+                session_user=self._req.session.user,
+            )
+            try:
+                entry = desk.import_known(filename, payload, actor)
+            except DeskError as exc:
+                if exc.problem_id:
+                    self._redirect(f"/import/problems/{quote(exc.problem_id)}")
+                    return
+                raise
+            again = "&again=1" if entry.get("idempotent") else ""
+            self._redirect(f"/import?imported={quote(entry['id'])}{again}")
 
         def _transactions(self, query: Mapping[str, List[str]]) -> None:
             filters = {
@@ -358,7 +488,64 @@ def _handler_for(  # pylint: disable=too-many-statements
                 panel=panel,
                 panel_error=panel_error,
                 open_id=open_id,
+                kinds=allowed_types(),
             )
+
+        def _bulk(self) -> None:
+            backup_now(desk.root, "before a bulk change", self._actor())
+            parsed = parse_qs(
+                self._req.raw.decode("utf-8", errors="replace"), keep_blank_values=True
+            )
+            apply_bulk(
+                desk,
+                parsed.get("row_id", []),
+                _first(parsed, "action"),
+                _first(parsed, "type"),
+                _first(parsed, "tag"),
+                _first(parsed, "why"),
+                self._actor(),
+            )
+            self._redirect("/transactions")
+
+        def _rules(self, query: Mapping[str, List[str]]) -> None:
+            rules = load_rules(desk.root)
+            chosen = _field(query, "preview")
+            preview: List[Dict[str, str]] = []
+            rule = next((item for item in rules if item.get("id") == chosen), None)
+            if rule is not None:
+                preview = preview_rule(desk.all_rows(), rule)
+            self._page(
+                "rules.html",
+                "Rules",
+                section="rules",
+                rules=rules,
+                preview=preview,
+                preview_id=chosen,
+                kinds=allowed_types(),
+            )
+
+        def _rules_add(self) -> None:
+            rule = save_rule(desk.root, self._req.form)
+            append_event(
+                desk.root,
+                "rule-add",
+                self._actor(),
+                "Added a labelling rule.",
+                {"rule_id": str(rule["id"]), "field": str(rule["field"])},
+            )
+            self._redirect(f"/rules?preview={quote(str(rule['id']))}")
+
+        def _rules_apply(self) -> None:
+            rule_id = self._req.form.get("rule_id", "")
+            set_enabled(desk.root, rule_id, True)
+            apply_enabled_rules(desk, self._actor())
+            self._redirect("/rules")
+
+        def _rules_toggle(self) -> None:
+            rule_id = self._req.form.get("rule_id", "")
+            enabled = self._req.form.get("enabled", "") == "yes"
+            set_enabled(desk.root, rule_id, enabled)
+            self._redirect("/rules")
 
         def _transaction(self, row_id: str, error: str) -> None:
             self._page(
@@ -475,7 +662,7 @@ def _handler_for(  # pylint: disable=too-many-statements
                 "Tax reports",
                 section="report",
                 report=report,
-                sa108=sa108_view(report, year) if report else None,
+                sa108=sa108_view(report, year, for_year(desk, year)) if report else None,
                 years=supported_years(),
                 tax_year=year,
                 year_label=label,
@@ -486,6 +673,11 @@ def _handler_for(  # pylint: disable=too-many-statements
                 records_path=str(desk.records_path),
                 error=error,
             )
+
+        def _accountant(self, query: Mapping[str, List[str]]) -> None:
+            year = _year(_field(query, "tax_year"))
+            body = build_zip(desk, year)
+            self._send(200, body, "application/zip", f"accountant-{year}.zip")
 
         def _pack(self, query: Mapping[str, List[str]], pdf: bool) -> None:
             year = _year(_field(query, "tax_year"))
@@ -558,8 +750,137 @@ def _handler_for(  # pylint: disable=too-many-statements
                 return
             self._plan("", result, form)
 
+        def _matches(self) -> None:
+            self._page("matches.html", "Matches", section="matches", view=match_view(desk))
+
+        def _audit(self) -> None:
+            from .events import read_events  # pylint: disable=import-outside-toplevel
+
+            self._page(
+                "audit.html",
+                "Audit",
+                section="audit",
+                view={
+                    "events": list(reversed(read_events(desk.root))),
+                    "changes": desk.change_log(),
+                    "backups": list_backups(desk.root),
+                    "retention": retention_count(desk.root),
+                },
+            )
+
+        def _audit_undo(self) -> None:
+            row_id = self._req.form.get("row_id", "")
+            latest = None
+            for entry in desk.change_log():
+                if entry.get("row_id") == row_id:
+                    latest = entry
+            if latest is not None:
+                desk.reclassify(
+                    row_id,
+                    str(latest.get("before_type") or ""),
+                    "Undo the latest change.",
+                    self._actor(),
+                    "",
+                    True,
+                )
+                append_event(
+                    desk.root, "undo", self._actor(), "A change was undone.", {"row": row_id}
+                )
+            self._redirect("/audit")
+
+        def _audit_backup(self) -> None:
+            backup_now(desk.root, "manual", self._actor())
+            self._redirect("/audit")
+
+        def _audit_restore(self) -> None:
+            restore_backup(desk.root, self._req.form.get("name", ""), self._actor())
+            self._redirect("/audit")
+
+        def _audit_retention(self) -> None:
+            save_retention(desk.root, self._req.form.get("count", ""))
+            self._redirect("/audit")
+
+        def _losses(self, query: Mapping[str, List[str]]) -> None:
+            from .losses import load_opening  # pylint: disable=import-outside-toplevel
+
+            self._page(
+                "losses.html",
+                "Losses",
+                section="losses",
+                view={"rows": schedule(desk), "opening": load_opening(desk.root)},
+                error=_field(query, "error"),
+            )
+
+        def _losses_save(self) -> None:
+            form = self._req.form
+            try:
+                save_opening(desk.root, form.get("year", ""), form.get("amount", ""))
+            except DeskError as exc:
+                self._redirect("/losses?error=" + quote(str(exc)))
+                return
+            append_event(
+                desk.root,
+                "losses",
+                self._actor(),
+                "Opening losses were saved.",
+                {"year": form.get("year", "")},
+            )
+            self._redirect("/losses")
+
+        def _defi(self, query: Mapping[str, List[str]]) -> None:
+            year = _year(_field(query, "tax_year"))
+            self._page(
+                "defi.html",
+                "DeFi",
+                section="defi",
+                view={"rows": pending_preview(desk, year), "year": year},
+            )
+
+        def _cost(self) -> None:
+            rows = desk.all_rows()
+            self._page(
+                "cost.html",
+                "Cost basis",
+                section="cost",
+                view={"assets": trace_rows(rows), "count": len(rows)},
+            )
+
+        def _matches_run(self) -> None:
+            actor = self._actor()
+            apply_auto_matches(desk, actor)
+            self._redirect("/matches")
+
+        def _matches_decide(self) -> None:
+            form = self._req.form
+            decide(
+                desk,
+                form.get("out_id", ""),
+                form.get("in_id", ""),
+                form.get("action", ""),
+                self._actor(),
+            )
+            self._redirect("/matches")
+
+        def _matches_settings(self) -> None:
+            save_settings(desk.root, self._req.form)
+            self._redirect("/matches")
+
+        def _actor(self) -> str:
+            return actor_for(
+                self.headers,
+                self._req.client,
+                host=self._req.host_name,
+                session_user=self._req.session.user,
+            )
+
         def _sync(self) -> None:
-            self._page("sync.html", "Sync", section="sync", secrets=secrets_present(desk))
+            self._page(
+                "sync.html",
+                "Sync",
+                section="sync",
+                secrets=secrets_present(desk),
+                extra=extra_status(desk),
+            )
 
         def _sync_ethereum(self) -> None:
             import_ethereum(
@@ -572,6 +893,44 @@ def _handler_for(  # pylint: disable=too-many-statements
                 desk, self._req.form.get("api_key", ""), self._req.form.get("api_secret", "")
             )
             self._redirect("/transactions?imported=kraken")
+
+        def _sync_evm(self) -> None:
+            form = self._req.form
+            import_evm(
+                desk,
+                form.get("address", ""),
+                form.get("chain", "base"),
+                form.get("api_key", ""),
+                form.get("explorer_url", ""),
+                form.get("chain_id", ""),
+                form.get("symbol", ""),
+            )
+            self._redirect("/transactions?imported=evm")
+
+        def _sync_solana(self) -> None:
+            form = self._req.form
+            import_solana(desk, form.get("address", ""), form.get("rpc_url", ""))
+            self._redirect("/transactions?imported=solana")
+
+        def _sync_kucoin(self) -> None:
+            form = self._req.form
+            import_kucoin(
+                desk,
+                form.get("api_key", ""),
+                form.get("api_secret", ""),
+                form.get("passphrase", ""),
+            )
+            self._redirect("/transactions?imported=kucoin")
+
+        def _sync_coinbase(self) -> None:
+            form = self._req.form
+            import_coinbase(desk, form.get("api_key", ""), form.get("api_secret", ""))
+            self._redirect("/transactions?imported=coinbase")
+
+        def _sync_revolut(self) -> None:
+            filename, payload = _uploaded_file(self.headers.get("Content-Type", ""), self._req.raw)
+            import_revolut_csv(desk, filename, payload)
+            self._redirect("/transactions?imported=revolut")
 
         def _report_csv(self, query: Mapping[str, List[str]]) -> None:
             year = _year(_field(query, "tax_year"))
@@ -674,6 +1033,11 @@ def _handler_for(  # pylint: disable=too-many-statements
             return self.rfile.read(length)
 
     return Handler
+
+
+def _first(parsed: Mapping[str, List[str]], key: str) -> str:
+    values = parsed.get(key, [])
+    return values[0] if values else ""
 
 
 def _year_action(path: str) -> str:

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block body %}
+    <div class="page-head">
+        <div>
+            <h1>Cost basis</h1>
+            <p class="lede">
+                A balance timeline for each asset. A gap is a hint to import a wallet or open Matches.
+                Nothing on this page changes the calculator.
+            </p>
+        </div>
+    </div>
+    <p class="banner">AWAITING TAX REVIEW</p>
+    {% for asset in view.assets %}
+        <section class="card pad">
+            <h2>{{ asset.asset }}</h2>
+            {% for gap in asset.gaps %}
+                <p class="warn">
+                    {{ gap.kind }} on {{ gap.wallet }} at {{ gap.when }}. {{ gap.detail }}
+                    <a href="{{ gap.href }}">Open the suggested page</a>
+                </p>
+            {% endfor %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>When</th>
+                        <th>Wallet</th>
+                        <th>Type</th>
+                        <th>Move</th>
+                        <th>Balance</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for event in asset.events %}
+                        <tr>
+                            <td>{{ event.when }}</td>
+                            <td>{{ event.wallet }}</td>
+                            <td>{{ event.kind }}</td>
+                            <td>{{ event.direction }} {{ event.quantity }}</td>
+                            <td>{{ event.balance }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+    {% else %}
+        <section class="card pad">
+            <p>No transactions yet. Import a file to trace a balance.</p>
+        </section>
+    {% endfor %}
+{% endblock body %}

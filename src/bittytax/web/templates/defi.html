@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block body %}
+    <div class="page-head">
+        <div>
+            <h1>DeFi preview</h1>
+            <p class="lede">
+                A tag changes the calculator only when that tag's rule-file entry says confirmed.
+                These rows show the effect of confirming one tag. Nothing is written.
+            </p>
+        </div>
+    </div>
+    <p class="banner">AWAITING TAX REVIEW</p>
+    {% for row in view.rows %}
+        <section class="card pad">
+            <h2>{{ row.tag }}</h2>
+            <p>{{ row.effect }}</p>
+            <p>{{ row.detail }}</p>
+            <p class="banner">{{ row.banner }}</p>
+        </section>
+    {% else %}
+        <section class="card pad">
+            <p>No unconfirmed DeFi tags on the ledger.</p>
+        </section>
+    {% endfor %}
+{% endblock body %}

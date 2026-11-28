@@ -64,6 +64,39 @@
                         <span class="nav-label">Settings</span>
                     </a>
                     <p class="more-label">More</p>
+                    <a href="/rules"
+                       {% if section == "rules" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("settings") }}
+                        <span class="nav-label">Rules</span>
+                    </a>
+                    <a href="/matches"
+                       {% if section == "matches" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("list") }}
+                        <span class="nav-label">Matches</span>
+                    </a>
+                    <a href="/cost" {% if section == "cost" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("report") }}
+                        <span class="nav-label">Cost basis</span>
+                    </a>
+                    <a href="/update"
+                       {% if section == "update" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("settings") }}
+                        <span class="nav-label">Update</span>
+                    </a>
+                    <a href="/audit"
+                       {% if section == "audit" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("list") }}
+                        <span class="nav-label">Audit</span>
+                    </a>
+                    <a href="/losses"
+                       {% if section == "losses" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("report") }}
+                        <span class="nav-label">Losses</span>
+                    </a>
+                    <a href="/defi" {% if section == "defi" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("report") }}
+                        <span class="nav-label">DeFi</span>
+                    </a>
                     <a href="/review"
                        {% if section == "review" %}aria-current="page"{% endif %}>
                         {{ ui.icon("list") }}

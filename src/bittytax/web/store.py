@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from .convert import (
     IGNORED,
@@ -29,7 +29,16 @@ from .convert import (
 )
 from .engine_run import report_csv, run_tax_year
 from .errors import DeskError
+from .events import append_event
 from .health import analyse
+from .import_inspect import (
+    cross_file_duplicates,
+    inspect_bytes,
+    load_prints,
+    normalise_bytes,
+    record_problem,
+    store_prints,
+)
 from .rules import defi_tags
 
 PAGE_SIZE = 50
@@ -44,6 +53,7 @@ class Desk:
         self.root = root
         self.raw_dir = root / "raw"
         self._lock = threading.Lock()
+        self._row_cache: Optional[Tuple[Tuple[int, int, int], List[Dict[str, Any]]]] = None
         self.root.mkdir(parents=True, exist_ok=True)
         self.raw_dir.mkdir(parents=True, exist_ok=True)
 
@@ -62,7 +72,30 @@ class Desk:
             return local
         return None
 
-    def import_bytes(self, filename: str, data: bytes) -> Dict[str, Any]:
+    def import_known(self, filename: str, data: bytes, who: str = "local") -> Dict[str, Any]:
+        """Import ``data``, or return the stored entry when those bytes are already here."""
+        if not data:
+            raise DeskError("The file is empty.")
+        digest = hashlib.sha256(data).hexdigest()
+        with self._lock:
+            for item in self.imports():
+                if item["sha256"] == digest:
+                    found = dict(item)
+                    found["idempotent"] = True
+                    append_event(
+                        self.root,
+                        "import-skip",
+                        who,
+                        "Same file already imported. No rows were added.",
+                        {"filename": _safe_name(filename), "import_id": str(item["id"])},
+                    )
+                    return found
+        entry = self.import_bytes(filename, data, who)
+        entry = dict(entry)
+        entry["idempotent"] = False
+        return entry
+
+    def import_bytes(self, filename: str, data: bytes, who: str = "local") -> Dict[str, Any]:
         if not data:
             raise DeskError("The file is empty.")
         name = _safe_name(filename)
@@ -78,18 +111,28 @@ class Desk:
             folder = self.raw_dir / import_id
             folder.mkdir(parents=True, exist_ok=False)
             raw_path = folder / name
-            saved = False
+            raw_path.write_bytes(data)
+            if hashlib.sha256(raw_path.read_bytes()).hexdigest() != digest:
+                raw_path.unlink()
+                folder.rmdir()
+                raise DeskError("The stored file does not match the upload.")
             try:
-                raw_path.write_bytes(data)
-                if hashlib.sha256(raw_path.read_bytes()).hexdigest() != digest:
-                    raise DeskError("The stored file does not match the upload.")
-                converted = convert_file(str(raw_path), _optional_path(self.wallets_path))
-                saved = True
-            finally:
-                if not saved:
-                    if raw_path.exists():
-                        raw_path.unlink()
-                    folder.rmdir()
+                converted, report = _convert_upload(raw_path, data, self.wallets_path)
+            except DeskError as exc:
+                _drop_raw(raw_path, folder)
+                problem = record_problem(self.root, name, data, "rejected")
+                append_event(
+                    self.root,
+                    "import-failed",
+                    who,
+                    "Import failed. A redacted parser problem was stored.",
+                    {"filename": name, "problem_id": str(problem["id"])},
+                )
+                raise DeskError(
+                    "The file could not be imported. Open the parser problem for the row pattern.",
+                    str(problem["id"]),
+                ) from exc
+            report["duplicates"] = cross_file_duplicates(converted.rows, load_prints(self.root))
             entry = _manifest_entry(
                 import_id,
                 name,
@@ -98,6 +141,7 @@ class Desk:
                 converted,
                 raw_path.relative_to(self.root).as_posix(),
             )
+            entry["report"] = _public_report(report)
             ledger = _read_json(self.root / "ledger.json", {"rows": []})
             review = _read_json(self.root / "review.json", {"imports": {}})
             start = len(ledger["rows"])
@@ -118,7 +162,27 @@ class Desk:
             _write_json(self.root / "ledger.json", ledger)
             _write_json(self.root / "review.json", review)
             _write_json(self.root / "imports.json", manifest)
+            store_prints(self.root, converted.rows, import_id, name)
+            append_event(
+                self.root,
+                "import",
+                who,
+                f"Imported {name}.",
+                {
+                    "import_id": import_id,
+                    "rows": str(len(converted.rows)),
+                    "skipped": str(len(report.get("skipped_reasons") or [])),
+                    "duplicates": str(len(report.get("duplicates") or [])),
+                },
+            )
             self._write_effective_unlocked()
+        from .koinly_labels import apply_koinly_labels  # pylint: disable=import-outside-toplevel
+        from .matching import apply_auto_matches  # pylint: disable=import-outside-toplevel
+        from .user_rules import apply_enabled_rules  # pylint: disable=import-outside-toplevel
+
+        apply_koinly_labels(self, entry, who)
+        apply_enabled_rules(self, who)
+        apply_auto_matches(self, who)
         return entry
 
     def imports(self) -> List[Dict[str, Any]]:
@@ -162,9 +226,8 @@ class Desk:
                 catalog = defi_tags()
                 row["defi_tags"] = catalog
                 chosen = ""
-                for item in row["log"]:
-                    if item.get("tag"):
-                        chosen = str(item["tag"])
+                if row["log"]:
+                    chosen = str(row["log"][-1].get("tag") or "")
                 row["tag"] = chosen
                 row["tag_note"] = next(
                     (item["note"] for item in catalog if item["id"] == chosen), ""
@@ -173,7 +236,13 @@ class Desk:
         raise DeskError("That transaction is not in the ledger.")
 
     def reclassify(
-        self, row_id: str, new_type: str, why: str, actor: str, tag: str = ""
+        self,
+        row_id: str,
+        new_type: str,
+        why: str,
+        actor: str,
+        tag: str = "",
+        allow_same: bool = False,
     ) -> Dict[str, str]:
         cleaned = why.strip()
         if not cleaned:
@@ -189,10 +258,21 @@ class Desk:
         with self._lock:
             current = self.transaction(row_id)
             before = str(current["type"])
-            if before == new_type and not chosen:
+            same_tag = chosen == str(current.get("tag", ""))
+            if before == new_type and same_tag:
+                if allow_same:
+                    return {
+                        "row_id": row_id,
+                        "at": _stamp(),
+                        "who": actor or "local",
+                        "why": cleaned,
+                        "before_type": before,
+                        "after_type": new_type,
+                        "tag": chosen,
+                    }
                 raise DeskError("That row already has this type.")
-            if before == new_type and chosen == str(current.get("tag", "")):
-                raise DeskError("That row already has this tag.")
+            if before == new_type and not chosen and not allow_same:
+                raise DeskError("That row already has this type.")
             entry = {
                 "row_id": row_id,
                 "at": _stamp(),
@@ -208,6 +288,52 @@ class Desk:
                 os.fsync(handle.fileno())
             self._write_effective_unlocked()
         return entry
+
+    def reclassify_many(self, changes: Sequence[Mapping[str, str]], actor: str) -> int:
+        """Append many type changes, then write the ledger once."""
+        if not changes:
+            return 0
+        allowed = set(allowed_types()) | {POSSIBLE_SPAM, IGNORED}
+        known = {item["id"] for item in defi_tags()}
+        with self._lock:
+            current = {row["id"]: row for row in self._effective_rows()}
+            lines = []
+            for change in changes:
+                row_id = str(change.get("row_id") or "")
+                row = current.get(row_id)
+                if row is None:
+                    raise DeskError("That transaction is not in the ledger.")
+                new_type = str(change.get("type") or "")
+                if new_type not in allowed:
+                    raise DeskError("Choose a BittyTax transaction type.")
+                tag = str(change.get("tag") or "").strip()
+                if tag and tag not in known:
+                    raise DeskError("Choose a DeFi tag from the rule file.")
+                why = str(change.get("why") or "").strip()
+                if not why:
+                    raise DeskError("Say why this type should change.")
+                if str(row["type"]) == new_type and tag == str(row.get("tag") or ""):
+                    continue
+                lines.append(
+                    {
+                        "row_id": row_id,
+                        "at": _stamp(),
+                        "who": actor or "local",
+                        "why": why[:500],
+                        "before_type": str(row["type"]),
+                        "after_type": new_type,
+                        "tag": tag,
+                    }
+                )
+            if not lines:
+                return 0
+            with (self.root / "reclassifications.jsonl").open("a", encoding="utf-8") as handle:
+                for entry in lines:
+                    handle.write(json.dumps(entry, ensure_ascii=True, sort_keys=True) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            self._write_effective_unlocked()
+        return len(lines)
 
     def change_log(self) -> List[Dict[str, str]]:
         path = self.root / "reclassifications.jsonl"
@@ -256,14 +382,26 @@ class Desk:
     def report(self, tax_year: int) -> Dict[str, Any]:
         with self._lock:
             self._write_effective_unlocked()
-            digest = hashlib.sha256(self.records_path.read_bytes()).hexdigest()
+            source = self._tax_source_unlocked()
+            digest = hashlib.sha256(source.read_bytes()).hexdigest()
         cache = self.root / "report-cache" / f"{tax_year}-{digest}.json"
         if cache.is_file():
             return json.loads(cache.read_text(encoding="utf-8"))
-        report = run_tax_year(str(self.records_path), tax_year)
+        report = run_tax_year(str(source), tax_year)
         cache.parent.mkdir(parents=True, exist_ok=True)
         _write_json(cache, report)
         return report
+
+    def _tax_source_unlocked(self) -> Path:
+        """Calculator file. A confirmed DeFi tag can change a type. An unconfirmed tag cannot."""
+        from .defi_apply import any_rewritten, tax_csv  # pylint: disable=import-outside-toplevel
+
+        rows = self._effective_rows()
+        if not any_rewritten(rows):
+            return self.records_path
+        path = self.root / "tax-records.csv"
+        path.write_text(tax_csv(rows, bittytax_header()), encoding="utf-8")
+        return path
 
     def report_csv(self, tax_year: int) -> str:
         return report_csv(self.report(tax_year))
@@ -284,7 +422,25 @@ class Desk:
         return packed
 
     def health_count(self, tax_year: int) -> int:
-        return int(self.health(tax_year)["total"])
+        cached = self._read_health_cache(tax_year)
+        if cached is not None:
+            return cached
+        total = int(self.health(tax_year)["total"])
+        cache = self._health_cache_path(tax_year)
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        _write_json(cache, {"total": total})
+        return total
+
+    def _health_cache_path(self, tax_year: int) -> Path:
+        digest = _file_digest(self.records_path)
+        return self.root / "health-cache" / f"{tax_year}-{digest}.json"
+
+    def _read_health_cache(self, tax_year: int) -> Optional[int]:
+        cache = self._health_cache_path(tax_year)
+        if not cache.is_file():
+            return None
+        loaded = json.loads(cache.read_text(encoding="utf-8"))
+        return int(loaded.get("total", 0))
 
     def counts(self) -> Dict[str, int]:
         review = self.review_lists()
@@ -326,6 +482,14 @@ class Desk:
             self._write_effective_unlocked()
 
     def _effective_rows(self) -> List[Dict[str, Any]]:
+        stamp = _source_stamp(self.root)
+        if self._row_cache is not None and self._row_cache[0] == stamp:
+            return list(self._row_cache[1])
+        rows = self._build_rows()
+        self._row_cache = (stamp, rows)
+        return list(rows)
+
+    def _build_rows(self) -> List[Dict[str, Any]]:
         changes = _latest_changes(self.change_log())
         fills = _latest_fills(self.price_fills())
         rows = []
@@ -333,13 +497,17 @@ class Desk:
             cells = list(stored["cells"])
             change = changes.get(stored["id"])
             changed = change is not None
+            tag = ""
             if change is not None:
                 cells[0] = change["after_type"]
+                tag = str(change.get("tag") or "")
             for field, entry in fills.get(stored["id"], {}).items():
                 index = _VALUE_INDEX.get(field)
                 if index is not None:
                     cells[index] = entry["value"]
-            rows.append(_present(stored["id"], stored["import_id"], cells, changed))
+            packed = _present(stored["id"], stored["import_id"], cells, changed)
+            packed["tag"] = tag
+            rows.append(packed)
         return rows
 
     def _ledger_rows(self) -> List[Dict[str, Any]]:
@@ -389,12 +557,12 @@ def _present(row_id: str, import_id: str, cells: Sequence[str], changed: bool) -
 
 
 def _status(kind: str, changed: bool) -> str:
-    if changed:
-        return "reclassified"
     if kind == POSSIBLE_SPAM:
         return "spam"
     if kind in {NEEDS_REVIEW, IGNORED}:
         return "needs-review"
+    if changed:
+        return "reclassified"
     if kind.startswith("_"):
         return "unmapped"
     return "clear"
@@ -613,6 +781,80 @@ def _read_json(path: Path, default: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(loaded, dict):
         raise DeskError(f"{path.name} is not a desk file.")
     return loaded
+
+
+def _convert_upload(
+    raw_path: Path, data: bytes, wallets: Optional[Path]
+) -> Tuple[Conversion, Dict[str, Any]]:
+    report = inspect_bytes(raw_path.name, data)
+    try:
+        converted = convert_file(str(raw_path), _optional_path(wallets))
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        cleaned = normalise_bytes(data)
+        if cleaned is None:
+            raise DeskError("The converter rejected this file.") from exc
+        notes = list(report.get("normalised") or [])
+        notes.append("rewritten as comma-separated text for the parser")
+        report["normalised"] = notes
+        try:
+            converted = _convert_cleaned(raw_path, cleaned, wallets)
+        except Exception as cleaned_exc:  # pylint: disable=broad-exception-caught
+            raise DeskError("The converter rejected this file.") from cleaned_exc
+    return converted, report
+
+
+def _convert_cleaned(raw_path: Path, cleaned: bytes, wallets: Optional[Path]) -> Conversion:
+    temp = raw_path.with_name("_retry.csv")
+    try:
+        temp.write_bytes(cleaned)
+        return convert_file(str(temp), _optional_path(wallets))
+    finally:
+        if temp.exists():
+            temp.unlink()
+
+
+def _drop_raw(raw_path: Path, folder: Path) -> None:
+    if raw_path.exists():
+        raw_path.unlink()
+    if folder.exists():
+        folder.rmdir()
+
+
+def _public_report(report: Mapping[str, Any]) -> Dict[str, Any]:
+    keys = (
+        "parsed_rows",
+        "blank_rows",
+        "skipped_reasons",
+        "unknown_columns",
+        "date_problems",
+        "number_problems",
+        "duplicates",
+        "normalised",
+        "parser",
+        "delimiter",
+    )
+    return {key: report.get(key) for key in keys}
+
+
+def _source_stamp(root: Path) -> Tuple[int, int, int]:
+    return (
+        _file_stamp(root / "ledger.json"),
+        _file_stamp(root / "reclassifications.jsonl"),
+        _file_stamp(root / "price-fills.jsonl"),
+    )
+
+
+def _file_stamp(path: Path) -> int:
+    if not path.is_file():
+        return 0
+    stat = path.stat()
+    return stat.st_mtime_ns + stat.st_size
+
+
+def _file_digest(path: Path) -> str:
+    if not path.is_file():
+        return hashlib.sha256(b"").hexdigest()
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
