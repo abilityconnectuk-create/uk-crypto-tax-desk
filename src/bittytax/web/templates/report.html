@@ -65,6 +65,93 @@
         {% if report.summary.proceeds_warning %}
             <p class="warn">Disposal proceeds are at or above the calculator's proceeds limit ({{ report.summary.proceeds_limit | gbp }}).</p>
         {% endif %}
+        {% if sa108 %}
+            <h2>SA108 cryptoassets (form {{ sa108.form_title }})</h2>
+            {% if sa108.banner %}
+                <p class="banner">{{ sa108.banner }}. The box numbers and the figures below are not confirmed. An accountant still has to check them before anyone files.</p>
+            {% endif %}
+            <p>{{ sa108.note }}</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Box</th>
+                        <th>Figure</th>
+                        <th>Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for box in sa108.boxes %}
+                        <tr>
+                            <td>{{ box.box }}</td>
+                            <td>
+                                {{ box.label }}
+                                {% if box.note %}
+                                    <br>
+                                    <span>{{ box.note }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if box.value %}
+                                    {% if box.key == "disposals" %}
+                                        {{ box.value }}
+                                    {% else %}
+                                        {{ box.value | gbp }}
+                                    {% endif %}
+                                {% else %}
+                                    Accountant review
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <p>Annual exempt amount {{ sa108.allowance.value | gbp }}. {{ sa108.allowance.note }}</p>
+            <p>
+                Reporting trigger: disposal proceeds over {{ sa108.trigger.proceeds_over | gbp }},
+                or gains over {{ sa108.trigger.gains_over | gbp }}.
+                {% if sa108.trigger.hit %}
+                    This year is over one of those amounts.
+                {% else %}
+                    This year is not over either amount.
+                {% endif %}
+                {{ sa108.trigger.note }}
+            </p>
+            {% if sa108.split %}
+                <h3>Rate split on {{ sa108.split.date }}</h3>
+                <p>{{ sa108.split.note }}</p>
+                <p>Before that date the config records {{ sa108.split.rates_before }}. On or after it, {{ sa108.split.rates_after }}.</p>
+                <p>Calculator gains before the date {{ sa108.split.gain_before | gbp }}. On or after {{ sa108.split.gain_after | gbp }}.</p>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Asset</th>
+                            <th>Date</th>
+                            <th>Period</th>
+                            <th>Proceeds</th>
+                            <th>Gain</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in sa108.split.disposals %}
+                            <tr>
+                                <td>{{ row.asset }}</td>
+                                <td>{{ row.date }}</td>
+                                <td>{{ row.period }}</td>
+                                <td>{{ row.proceeds | gbp }}</td>
+                                <td>{{ row.gain | gbp }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% endif %}
+            <ul>
+                {% for source in sa108.sources %}
+                    <li>
+                        <a href="{{ source.url }}">{{ source.title }}</a>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% endif %}
         <h2>Tax estimate</h2>
         <p>The figures below are only an estimate. They do not take into consideration other gains and losses in the same tax year. Always consult a professional accountant before filing.</p>
         {% if report.summary.split_date %}

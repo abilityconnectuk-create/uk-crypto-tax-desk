@@ -1,0 +1,62 @@
+# Tax parameters for the year ending 5 April 2026. Copied beside the calculator.
+# Every value stays unconfirmed until an accountant signs it off.
+tax_year: "2025-26"
+ending_year: 2026
+confirmed: false
+sources:
+  - title: Self Assessment capital gains summary (SA108)
+    url: https://www.gov.uk/government/publications/self-assessment-capital-gains-summary-sa108
+  - title: CRYPTO23000
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto23000
+parameters:
+  annual_exempt_amount:
+    value: "3000"
+    confirmed: false
+    note: Display the allowance. Do not deduct it from the SA108 crypto boxes.
+    sources:
+      - title: Self Assessment capital gains summary (SA108)
+        url: https://www.gov.uk/government/publications/self-assessment-capital-gains-summary-sa108
+  basic_rate:
+    value: "18"
+    confirmed: false
+    note: Rate used by the calculator for this year. No in-year split is recorded.
+    sources:
+      - title: Self Assessment capital gains summary (SA108)
+        url: https://www.gov.uk/government/publications/self-assessment-capital-gains-summary-sa108
+  higher_rate:
+    value: "24"
+    confirmed: false
+    note: Rate used by the calculator for this year. No in-year split is recorded.
+    sources:
+      - title: Self Assessment capital gains summary (SA108)
+        url: https://www.gov.uk/government/publications/self-assessment-capital-gains-summary-sa108
+  proceeds_reporting_threshold:
+    value: "50000"
+    confirmed: false
+    note: Disposal proceeds over this amount are a reporting trigger. Not a four-times allowance test.
+    sources:
+      - title: Self Assessment capital gains summary (SA108)
+        url: https://www.gov.uk/government/publications/self-assessment-capital-gains-summary-sa108
+  gains_reporting_threshold:
+    value: "3000"
+    confirmed: false
+    note: Gains over this amount are a reporting trigger. Not a four-times allowance test.
+    sources:
+      - title: Self Assessment capital gains summary (SA108)
+        url: https://www.gov.uk/government/publications/self-assessment-capital-gains-summary-sa108
+  trading_misc_allowance:
+    value: "1000"
+    confirmed: false
+    note: >
+      Show beside staking rewards. Whether the activity is a trade is
+      accountant review. Do not deduct it here.
+    sources:
+      - title: CRYPTO21200
+        url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto21200
+valuation:
+  method: GBP market value at the time of the event, using one method and keeping a record of it.
+  manual: CRYPTO23000
+  confirmed: false
+  sources:
+    - title: CRYPTO23000
+      url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto23000

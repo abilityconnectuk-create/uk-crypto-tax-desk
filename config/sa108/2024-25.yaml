@@ -1,0 +1,127 @@
+# SA108 mapping for the year ending 5 April 2025. Every rule stays unconfirmed.
+tax_year: "2024-25"
+ending_year: 2025
+form_title: "2025"
+confirmed: false
+section: Cryptoassets
+note: >
+  Cryptoasset disposals use boxes 13.1 to 13.8 only. Boxes 14 to 22 are
+  other property, assets and gains, and are not used here. There is no
+  net-gain box. Report gross gains and gross losses. Do not deduct the
+  annual exempt amount from these boxes.
+sources:
+  - title: Self Assessment capital gains summary (SA108)
+    url: https://www.gov.uk/government/publications/self-assessment-capital-gains-summary-sa108
+  - title: CRYPTO22200
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto22200
+boxes:
+  - box: "13.1"
+    key: disposals
+    label: Number of disposals
+    engine_field: disposals
+    accountant_review: false
+    confirmed: false
+  - box: "13.2"
+    key: proceeds
+    label: Disposal proceeds
+    engine_field: proceeds
+    accountant_review: false
+    confirmed: false
+  - box: "13.3"
+    key: allowable_costs
+    label: Allowable costs (including purchase price)
+    engine_field: allowable_costs
+    accountant_review: false
+    confirmed: false
+  - box: "13.4"
+    key: gains_before_losses
+    label: Gains in the year, before losses
+    engine_field: total_gain
+    accountant_review: false
+    confirmed: false
+  - box: "13.5"
+    key: losses
+    label: Losses in the year
+    engine_field: losses
+    accountant_review: false
+    confirmed: false
+  - box: "13.6"
+    key: claim_code
+    label: Claim or election code
+    engine_field: ""
+    accountant_review: true
+    confirmed: false
+    note: The claim or election code is not calculated. An accountant completes box 13.6.
+  - box: "13.7"
+    key: real_time_result
+    label: Real Time Transaction result
+    engine_field: ""
+    accountant_review: true
+    confirmed: false
+    note: Box 13.7 is the Real Time Transaction gain or loss already reported. The calculator does not store it.
+  - box: "13.8"
+    key: real_time_tax_paid
+    label: Tax already paid on the Real Time Transaction result
+    engine_field: ""
+    accountant_review: true
+    confirmed: false
+    note: Box 13.8 is tax already paid on the Real Time Transaction result. The calculator does not store it.
+  - box: "45"
+    key: losses_brought_forward
+    label: Losses brought forward
+    engine_field: ""
+    accountant_review: true
+    confirmed: false
+    note: >
+      Losses brought forward go in box 45. They only reduce gains down to the
+      annual exempt amount. The calculator does not keep this balance.
+  - box: "47"
+    key: losses_carried_forward
+    label: Losses carried forward
+    engine_field: ""
+    accountant_review: true
+    confirmed: false
+    note: Losses carried forward go in box 47. The calculator does not keep this balance.
+  - box: "51"
+    key: extra_tax_note
+    label: Additional tax from the in-year rate change
+    engine_field: ""
+    accountant_review: true
+    confirmed: false
+    note: >
+      The extra tax from the 30 October 2024 rate change is noted in box 51.
+      The desk shows the split of gains. It does not calculate the box 51 amount.
+  - box: "53"
+    key: estimates_flag
+    label: Estimates and valuations
+    engine_field: ""
+    accountant_review: true
+    confirmed: false
+    note: Box 53 is the estimates and valuations flag. An accountant decides whether to set it.
+annual_exempt_amount:
+  value: "3000"
+  confirmed: false
+  deduct_from_boxes: false
+  note: Display only. Do not deduct it from boxes 13.1 to 13.5.
+reporting_trigger:
+  proceeds_over: "50000"
+  gains_over: "3000"
+  confirmed: false
+  note: >
+    Reporting is indicated when disposal proceeds are over 50000 or gains
+    are over 3000. This is not a four-times allowance test.
+split:
+  applies: true
+  date: "2024-10-30"
+  rates_before:
+    basic: "10"
+    higher: "20"
+    confirmed: false
+  rates_after:
+    basic: "18"
+    higher: "24"
+    confirmed: false
+  confirmed: false
+  note: >
+    Tag each disposal as before 30 October 2024, or on or after that date.
+    Rates are 10 and 20 percent, then 18 and 24 percent.

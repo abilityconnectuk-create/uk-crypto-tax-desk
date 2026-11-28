@@ -33,6 +33,8 @@ from .config_view import config_snapshot
 from .engine_run import supported_years
 from .errors import DeskError
 from .identity import LOOPBACK, actor_for, trusted_tailscale_user
+from .rules import accountant_review_items
+from .sa108 import sa108_view
 from .store import Desk
 
 _STATIC = Path(__file__).resolve().parent / "static"
@@ -324,7 +326,7 @@ def _handler_for(desk: Desk, desk_auth: DeskAuth, bind_host: str) -> type:
                 health=desk.health(year),
                 years=supported_years(),
                 tax_year=year,
-                accountant_review=[],
+                accountant_review=accountant_review_items(year),
             )
 
         def _review(self, query: Mapping[str, List[str]]) -> None:
@@ -347,6 +349,7 @@ def _handler_for(desk: Desk, desk_auth: DeskAuth, bind_host: str) -> type:
                 "Report",
                 section="report",
                 report=report,
+                sa108=sa108_view(report, year) if report else None,
                 years=supported_years(),
                 tax_year=year,
                 records_path=str(desk.records_path),
