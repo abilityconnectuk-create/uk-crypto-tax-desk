@@ -26,10 +26,9 @@ def backup_now(root: Path, reason: str, who: str = "local") -> Path:
     root.mkdir(parents=True, exist_ok=True)
     folder = root / "backups"
     folder.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    path = folder / f"{stamp}.btbk"
-    path.write_bytes(_encrypt(_pack(root), _key(root)))
-    os.chmod(path, 0o600)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    payload = _encrypt(_pack(root), _key(root))
+    path = _create_archive(folder, stamp, payload)
     _prune(folder, _retention(root))
     append_event(root, "backup", who, "An encrypted backup was written.", {"reason": reason})
     return path
@@ -135,6 +134,34 @@ def _xor(payload: bytes, key: bytes, nonce: bytes) -> bytes:
         out.extend(block)
         counter += 1
     return bytes(left ^ right for left, right in zip(payload, out))
+
+
+def _create_archive(folder: Path, stamp: str, payload: bytes) -> Path:
+    """Pick a free name. Two backups in the same second must not overwrite."""
+    for extra in range(100):
+        name = f"{stamp}.btbk" if extra == 0 else f"{stamp}-{extra}.btbk"
+        path = folder / name
+        try:
+            _write_private(path, payload)
+        except FileExistsError:
+            continue
+        return path
+    raise DeskError("The backup could not be written.")
+
+
+def _write_private(path: Path, payload: bytes) -> None:
+    """Create a new file at mode 0600. ``write_bytes`` then ``chmod`` stays open on Windows."""
+    descriptor = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise DeskError("The backup could not be written.")
+            view = view[written:]
+    finally:
+        os.close(descriptor)
+    os.chmod(path, 0o600)
 
 
 def _key(root: Path) -> bytes:
