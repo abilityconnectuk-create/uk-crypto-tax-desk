@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block body %}
+    <h1>Import file</h1>
+    <p class="lede">
+        {{ wallet.name }}. A Coinbase, KuCoin or Revolut X CSV is held for review.
+        It is not added to the tax report until you accept it. Nothing is written to Koinly.
+    </p>
+    {% if error %}<p class="warn">{{ error }}</p>{% endif %}
+    <form method="post" action="/wallets/import" enctype="multipart/form-data">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="wallet_id" value="{{ wallet.id }}">
+        <label for="import-file">CSV file</label>
+        <input id="import-file"
+               name="file"
+               type="file"
+               accept=".csv,text/csv"
+               required>
+        <button type="submit">Import file</button>
+    </form>
+    <p>
+        <a href="/wallets">Back to wallets</a>
+    </p>
+{% endblock %}

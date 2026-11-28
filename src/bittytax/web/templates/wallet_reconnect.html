@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block body %}
+    <h1>Reconnect</h1>
+    <p class="lede">
+        {{ wallet.name }}. API keys must be READ-ONLY. A key that can trade or withdraw is refused.
+        The new key replaces the stored one and is not shown again.
+    </p>
+    {% if error %}<p class="warn">{{ error }}</p>{% endif %}
+    <form method="post" action="/wallets/reconnect">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="wallet_id" value="{{ wallet.id }}">
+        <label for="api-key">API key</label>
+        <input id="api-key" name="api_key" type="password" autocomplete="off">
+        <label for="api-secret">API secret</label>
+        <input id="api-secret" name="api_secret" type="password" autocomplete="off">
+        <label for="api-phrase">Passphrase</label>
+        <input id="api-phrase" name="passphrase" type="password" autocomplete="off">
+        <button type="submit">Save key</button>
+    </form>
+    <p>
+        <a href="/wallets">Back to wallets</a>
+    </p>
+{% endblock %}

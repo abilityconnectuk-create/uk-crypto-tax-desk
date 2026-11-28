@@ -31,6 +31,7 @@ from .queues import gaps, transfers
 from .rules import load_rules, load_sa108, slug_for
 from .sa108 import sa108_view
 from .taxyear import tax_year_containing
+from .wallets_desk import balance_warnings
 
 DEFAULT_THRESHOLD = Decimal("1")
 _PENCE = Decimal("0.01")
@@ -47,6 +48,7 @@ CATEGORIES: Tuple[Tuple[str, str], ...] = (
     ("unconfirmed_rule", "Unconfirmed rules"),
     ("koinly_difference", "Koinly differences"),
     ("exchange_gap", "Exchange gaps"),
+    ("balance_difference", "Balance differences"),
     ("loss_deadline", "Loss deadlines"),
     ("awaiting_decision", "Awaiting decision"),
     ("accepted_gap", "Accepted gaps"),
@@ -112,6 +114,7 @@ def readiness(
     found.extend(unconfirmed_items(rules, sa108, slug_for(year)))
     found.extend(koinly_differences(boxes, income, koinly, band, year))
     found.extend(exchange_gap_items(desk, year))
+    found.extend(balance_warnings(desk, year))
     found.extend(loss_items(loss_rows, year))
     found.extend(decision_items(negligible_claims(desk.root), _lots(desk), year))
     found.extend(accepted_gap_items(_spec_boxes(sa108), gaps(desk.root), year))

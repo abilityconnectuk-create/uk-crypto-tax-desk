@@ -9,7 +9,7 @@ a picture of the holdings. It is not advice.
 from __future__ import annotations
 
 import math
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
@@ -53,36 +53,6 @@ def avatar_slot(name: str) -> int:
     for char in name or "?":
         total = (total + ord(char)) % 8
     return total
-
-
-def ago(stamp: str, now: Optional[datetime] = None) -> str:
-    """A short age for an import time, such as ``3 days ago``."""
-    if not stamp:
-        return ""
-    try:
-        then = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-    except ValueError:
-        return stamp
-    moment = now or datetime.now(timezone.utc)
-    seconds = int((moment - then).total_seconds())
-    if seconds < 45:
-        return "just now"
-    steps = (
-        (60, "minute"),
-        (3600, "hour"),
-        (86400, "day"),
-        (86400 * 7, "week"),
-        (86400 * 30, "month"),
-        (86400 * 365, "year"),
-    )
-    chosen = "minute"
-    count = max(1, seconds // 60)
-    for size, label in steps:
-        if seconds >= size:
-            chosen = label
-            count = max(1, seconds // size)
-    suffix = "" if count == 1 else "s"
-    return f"{count} {chosen}{suffix} ago"
 
 
 def year_title(label: str) -> str:

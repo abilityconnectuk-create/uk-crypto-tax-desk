@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block body %}
+    <div class="page-head">
+        <div>
+            <p class="eyebrow">Wallets</p>
+            <h1>Add</h1>
+        </div>
+        <a class="btn" href="/wallets">Back</a>
+    </div>
+    {% if error %}<p class="warn">{{ error }}</p>{% endif %}
+    {% if not chosen %}
+        <p class="lede">Search the list, then pick an integration.</p>
+        <label class="sr" for="parser-search">Search integrations</label>
+        <input id="parser-search" type="search" placeholder="Search integrations">
+        <div class="chips" role="group" aria-label="Integration groups">
+            <button type="button" data-parser-group="all" aria-pressed="true">All</button>
+            <button type="button" data-parser-group="exchange" aria-pressed="false">Exchanges</button>
+            <button type="button" data-parser-group="wallet" aria-pressed="false">Wallets</button>
+            <button type="button" data-parser-group="blockchain" aria-pressed="false">Blockchains</button>
+            <button type="button" data-parser-group="service" aria-pressed="false">Services</button>
+        </div>
+        <ul class="parser-list" id="parser-list">
+            {% for item in integrations %}
+                <li data-group="{{ item.group }}" data-name="{{ item.name|lower }}">
+                    <a href="/wallets/add?integration={{ item.id }}">{{ item.name }}</a>
+                    <span class="muted">{{ item.group_label }}</span>
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        {% if choice.existing %}
+            <p class="warn">A wallet with this name already exists. Create anyway, or use the existing wallet.</p>
+            <ul>
+                {% for item in choice.existing %}
+                    <li>
+                        <a href="/wallets#wallet-{{ item.id }}">{{ item.name }}</a>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+        <form method="post" action="/wallets/add" enctype="multipart/form-data">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="integration" value="{{ chosen.id }}">
+            <h2>{{ chosen.name }}</h2>
+            <p class="muted">{{ chosen.group_label }}</p>
+            <label for="wallet-name">Wallet name</label>
+            <input id="wallet-name"
+                   name="name"
+                   value="{{ spec.name or chosen.name }}"
+                   required>
+            {% if chosen.group == "exchange" %}
+                <fieldset>
+                    <legend>How should this wallet be filled?</legend>
+                    <p>API keys must be READ-ONLY. A key that can trade or withdraw is refused.</p>
+                    {% if chosen.api == "yes" %}
+                        <label>
+                            <input type="radio"
+                                   name="method"
+                                   value="api"
+                                   {% if spec.method == "api" or not spec.method %}checked{% endif %}>
+                            Read-only API (recommended)
+                        </label>
+                    {% endif %}
+                    <label>
+                        <input type="radio"
+                               name="method"
+                               value="file"
+                               {% if spec.method == "file" or chosen.api != "yes" and not spec.method %}checked{% endif %}>
+                        File import
+                    </label>
+                    <label>
+                        <input type="radio"
+                               name="method"
+                               value="later"
+                               {% if spec.method == "later" %}checked{% endif %}>
+                        Add data later
+                    </label>
+                </fieldset>
+                {% if chosen.api == "yes" %}
+                    <p>The key is stored on this computer and is not shown again.</p>
+                    <label for="api-key">API key</label>
+                    <input id="api-key" name="api_key" type="password" autocomplete="off">
+                    <label for="api-secret">API secret</label>
+                    <input id="api-secret" name="api_secret" type="password" autocomplete="off">
+                    {% if chosen.id == "kucoin" %}
+                        <label for="api-phrase">Passphrase</label>
+                        <input id="api-phrase" name="passphrase" type="password" autocomplete="off">
+                    {% endif %}
+                {% endif %}
+                <p>File import uses the Coinbase, KuCoin and Revolut X parsers. The file waits on Review.</p>
+                <label for="import-file">File import</label>
+                <input id="import-file" name="file" type="file" accept=".csv,text/csv">
+            {% elif chosen.group == "service" %}
+                <input type="hidden" name="method" value="later">
+                <p>Add the wallet now. A Koinly file is imported from Imports, and it is not sent anywhere.</p>
+                <p>
+                    <a href="/import/add">Open Imports</a>
+                </p>
+            {% else %}
+                <input type="hidden" name="method" value="address">
+                <label for="address">Public address</label>
+                <input id="address"
+                       name="address"
+                       value="{{ spec.address or '' }}"
+                       autocomplete="off">
+                <fieldset>
+                    <legend>Chains</legend>
+                    <p>One address on several EVM chains makes one wallet per chain.</p>
+                    {% for chain in chains %}
+                        {% if chain.family == chosen.family %}
+                            <label>
+                                <input type="checkbox"
+                                       name="chain_{{ chain.id }}"
+                                       value="yes"
+                                       {% if chain.id in checked %}checked{% endif %}>
+                                {{ chain.name }}
+                            </label>
+                        {% endif %}
+                    {% endfor %}
+                </fieldset>
+                <p>
+                    Robinhood Chain is an Arbitrum Nitro layer 2, chain id 4663.
+                    Its explorer and RPC URL are set here when you tick that chain.
+                </p>
+                <label for="explorer-url">Explorer URL</label>
+                <input id="explorer-url"
+                       name="explorer_url"
+                       value="{{ spec.explorer_url or '' }}"
+                       placeholder="https://">
+                <label for="rpc-url">RPC URL</label>
+                <input id="rpc-url"
+                       name="rpc_url"
+                       value="{{ spec.rpc_url or '' }}"
+                       placeholder="https://">
+                <p>Explorer keys must be READ-ONLY. The key is stored on this computer and is not shown again.</p>
+                <label for="explorer-key">Explorer API key</label>
+                <input id="explorer-key" name="api_key" type="password" autocomplete="off">
+                <details>
+                    <summary>Advanced options</summary>
+                    <label for="start-date">Start import from</label>
+                    <input id="start-date"
+                           name="start_date"
+                           type="date"
+                           value="{{ spec.start_date or '' }}">
+                    <label for="deposit-tag">Tag deposits as</label>
+                    <select id="deposit-tag" name="deposit_tag">
+                        <option value="">No tag</option>
+                        {% for tag in tags %}
+                            <option value="{{ tag.id }}"
+                                    {% if spec.deposit_tag == tag.id %}selected{% endif %}>{{ tag.label }}</option>
+                        {% endfor %}
+                    </select>
+                    <p>A tag is a suggestion. It is not confirmed and it does not change the tax result.</p>
+                    <label>
+                        <input type="checkbox"
+                               name="ignore_reported"
+                               value="yes"
+                               {% if spec.ignore_reported %}checked{% endif %}>
+                        Ignore reported balances
+                    </label>
+                </details>
+            {% endif %}
+            {% if choice.existing %}
+                <button type="submit" name="decision" value="existing">Use existing</button>
+                <button type="submit" name="decision" value="create">Create anyway</button>
+            {% else %}
+                <button type="submit">Add wallet</button>
+            {% endif %}
+        </form>
+    {% endif %}
+{% endblock %}
