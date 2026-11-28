@@ -9,6 +9,7 @@ The price data cache format has been updated to correctly distinguish assets tha
 The new `price_via_btc` config option may not exist in your config file. If it is missing, BittyTax keeps the legacy BTC-intermediate behaviour for backward compatibility. Add `price_via_btc: False` to your config if you want historic prices to use direct local currency lookups.
 
 ### Added
+- Local web desk: the transaction list can relabel, tag, mark as spam, ignore, or undo several rows at once. A rules page stores "when wallet, asset, description or type matches, set type or tag". Rules show a preview, run again on demand, and run on import. Each change is logged.
 - Local web desk: withdrawals and deposits on the user's own wallets can be paired by asset, amount and a time window. A high score is matched automatically as a withdrawal and a deposit, which the calculator already treats as a transfer. Other pairs wait on a suggestion list with Accept, Reject and Unmatch. Each choice is appended to the log.
 - Local web desk: each import stores a per-file report (rows parsed, rows skipped and why, unknown columns, date and number formats, duplicates in other files). Uploading the same bytes again adds nothing. A rejected file opens a parser-problem page that shows the row pattern with the values removed.
 - Local web desk: `bittytax_web` or `python -m bittytax.web` serves a loopback UI for import, reclassification, review queues and a tax-year report. Figures come from the existing calculator. Uploads are kept unchanged.

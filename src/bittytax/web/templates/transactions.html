@@ -124,39 +124,76 @@
         <input type="hidden" name="per" value="{{ per }}">
         <button type="submit" class="ghost">Apply</button>
     </form>
-    <div class="card tx-list">
-        {% for row in listing.rows %}
-            {% set asset = row.buy_asset or row.sell_asset %}
-            {% set qty = row.buy_quantity or row.sell_quantity %}
-            {% set value = row.buy_value or row.sell_value %}
-            <a class="tx-row"
-               href="/transactions/{{ row.import_id }}/{{ row.id.split(':')[1] }}">
-                <span class="tx-main">
-                    <span class="kind" aria-hidden="true">{{ row.type[:1] }}</span>
-                    <span class="two">
-                        <strong>{{ row.type }}</strong>
-                        <small>{{ row.date }}</small>
-                    </span>
-                </span>
-                <span class="tx-asset">
-                    <span class="letter av-{{ asset|slot }}">{{ (asset or "?")[:1] }}</span>
-                    <span class="two">
-                        <strong>{{ qty }} {{ asset }}</strong>
-                        <small>{{ value|gbp }}</small>
-                    </span>
-                </span>
-                <span class="tx-side">
-                    {% if row.note %}<span class="tag">{{ row.note }}</span>{% endif %}
-                    {% if row.status != "clear" %}<span class="tag warn">{{ row.status }}</span>{% endif %}
-                    {% if row.status in ["needs-review", "spam", "unmapped"] %}
-                        <span class="warn-icon" aria-label="Warning">!</span>
-                    {% endif %}
-                    <code class="chip">{{ row.id.split(":")[1] }}</code>
-                </span>
-            </a>
-        {% else %}
-            <p class="pad">No transactions match.</p>
-        {% endfor %}
+    <form method="post" action="/transactions/bulk">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <div class="card pad bulk-bar">
+            <label>
+                Type
+                <select name="type">
+                    <option value="">Keep type</option>
+                    {% for kind in kinds %}
+                        <option value="{{ kind }}">{{ kind }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Tag
+                <input name="tag" placeholder="DeFi tag id">
+            </label>
+            <label>
+                Why
+                <input name="why" placeholder="Reason">
+            </label>
+            <button type="submit" name="action" value="reclassify">Reclassify</button>
+            <button type="submit" name="action" value="tag">Tag</button>
+            <button type="submit" name="action" value="spam">Spam</button>
+            <button type="submit" name="action" value="ignore">Ignore</button>
+            <button type="submit" name="action" value="undo">Undo</button>
+        </div>
+        <div class="card tx-list">
+            {% for row in listing.rows %}
+                {% set asset = row.buy_asset or row.sell_asset %}
+                {% set qty = row.buy_quantity or row.sell_quantity %}
+                {% set value = row.buy_value or row.sell_value %}
+                <div class="tx-select">
+                    <label class="tick">
+                        <input type="checkbox"
+                               name="row_id"
+                               value="{{ row.id }}"
+                               aria-label="Select {{ row.id }}">
+                    </label>
+                    <a class="tx-row"
+                       href="/transactions/{{ row.import_id }}/{{ row.id.split(':')[1] }}">
+                        <span class="tx-main">
+                            <span class="kind" aria-hidden="true">{{ row.type[:1] }}</span>
+                            <span class="two">
+                                <strong>{{ row.type }}</strong>
+                                <small>{{ row.date }}</small>
+                            </span>
+                        </span>
+                        <span class="tx-asset">
+                            <span class="letter av-{{ asset|slot }}">{{ (asset or "?")[:1] }}</span>
+                            <span class="two">
+                                <strong>{{ qty }} {{ asset }}</strong>
+                                <small>{{ value|gbp }}</small>
+                            </span>
+                        </span>
+                        <span class="tx-side">
+                            {% if row.note %}<span class="tag">{{ row.note }}</span>{% endif %}
+                            {% if row.status != "clear" %}<span class="tag warn">{{ row.status }}</span>{% endif %}
+                            {% if row.status in ["needs-review", "spam", "unmapped"] %}
+                                <span class="warn-icon" aria-label="Warning">!</span>
+                            {% endif %}
+                            <code class="chip">{{ row.id.split(":")[1] }}</code>
+                        </span>
+                    </a>
+                </div>
+            {% else %}
+                <p class="pad">No transactions match.</p>
+            {% endfor %}
+        </div>
+    </form>
+    <div class="card">
         <div class="pager">
             <p>{{ listing.total }} transactions</p>
             <form method="get" action="/transactions">

@@ -32,9 +32,11 @@ from .auth import (
     safe_next,
 )
 from .config_view import config_snapshot
+from .convert import allowed_types
 from .dashboard import tax_year_containing
 from .engine_run import supported_years
 from .errors import DeskError
+from .events import append_event
 from .glossary import GLOSSARY
 from .identity import LOOPBACK, actor_for, trusted_tailscale_user
 from .import_inspect import find_problem, load_problems
@@ -57,6 +59,14 @@ from .sa108 import sa108_view
 from .sources import detect_upload, parser_catalogue
 from .store import Desk
 from .sync import import_ethereum, import_kraken, secrets_present
+from .user_rules import (
+    apply_bulk,
+    apply_enabled_rules,
+    load_rules,
+    preview_rule,
+    save_rule,
+    set_enabled,
+)
 
 _STATIC = Path(__file__).resolve().parent / "static"
 _ROW_PATH = re.compile(r"^/transactions/([0-9A-Za-zT-]+)/([0-9]+)$")
@@ -228,6 +238,11 @@ def _handler_for(  # pylint: disable=too-many-statements
                 ("POST", "/import/detect"): self._import_detect,
                 ("POST", "/import"): self._import_post,
                 ("GET", "/transactions"): lambda: self._transactions(query),
+                ("POST", "/transactions/bulk"): self._bulk,
+                ("GET", "/rules"): lambda: self._rules(query),
+                ("POST", "/rules"): self._rules_add,
+                ("POST", "/rules/apply"): self._rules_apply,
+                ("POST", "/rules/toggle"): self._rules_toggle,
                 ("GET", "/review"): lambda: self._review(query),
                 ("GET", "/health"): lambda: self._health(query),
                 ("GET", "/report"): lambda: self._report(query),
@@ -405,7 +420,63 @@ def _handler_for(  # pylint: disable=too-many-statements
                 panel=panel,
                 panel_error=panel_error,
                 open_id=open_id,
+                kinds=allowed_types(),
             )
+
+        def _bulk(self) -> None:
+            parsed = parse_qs(
+                self._req.raw.decode("utf-8", errors="replace"), keep_blank_values=True
+            )
+            apply_bulk(
+                desk,
+                parsed.get("row_id", []),
+                _first(parsed, "action"),
+                _first(parsed, "type"),
+                _first(parsed, "tag"),
+                _first(parsed, "why"),
+                self._actor(),
+            )
+            self._redirect("/transactions")
+
+        def _rules(self, query: Mapping[str, List[str]]) -> None:
+            rules = load_rules(desk.root)
+            chosen = _field(query, "preview")
+            preview: List[Dict[str, str]] = []
+            rule = next((item for item in rules if item.get("id") == chosen), None)
+            if rule is not None:
+                preview = preview_rule(desk.all_rows(), rule)
+            self._page(
+                "rules.html",
+                "Rules",
+                section="rules",
+                rules=rules,
+                preview=preview,
+                preview_id=chosen,
+                kinds=allowed_types(),
+            )
+
+        def _rules_add(self) -> None:
+            rule = save_rule(desk.root, self._req.form)
+            append_event(
+                desk.root,
+                "rule-add",
+                self._actor(),
+                "Added a labelling rule.",
+                {"rule_id": str(rule["id"]), "field": str(rule["field"])},
+            )
+            self._redirect(f"/rules?preview={quote(str(rule['id']))}")
+
+        def _rules_apply(self) -> None:
+            rule_id = self._req.form.get("rule_id", "")
+            set_enabled(desk.root, rule_id, True)
+            apply_enabled_rules(desk, self._actor())
+            self._redirect("/rules")
+
+        def _rules_toggle(self) -> None:
+            rule_id = self._req.form.get("rule_id", "")
+            enabled = self._req.form.get("enabled", "") == "yes"
+            set_enabled(desk.root, rule_id, enabled)
+            self._redirect("/rules")
 
         def _transaction(self, row_id: str, error: str) -> None:
             self._page(
@@ -752,6 +823,11 @@ def _handler_for(  # pylint: disable=too-many-statements
             return self.rfile.read(length)
 
     return Handler
+
+
+def _first(parsed: Mapping[str, List[str]], key: str) -> str:
+    values = parsed.get(key, [])
+    return values[0] if values else ""
 
 
 def _year_action(path: str) -> str:

@@ -176,8 +176,10 @@ class Desk:
             )
             self._write_effective_unlocked()
         from .matching import apply_auto_matches  # pylint: disable=import-outside-toplevel
+        from .user_rules import apply_enabled_rules  # pylint: disable=import-outside-toplevel
 
         apply_auto_matches(self, who)
+        apply_enabled_rules(self, who)
         return entry
 
     def imports(self) -> List[Dict[str, Any]]:
@@ -283,6 +285,52 @@ class Desk:
                 os.fsync(handle.fileno())
             self._write_effective_unlocked()
         return entry
+
+    def reclassify_many(self, changes: Sequence[Mapping[str, str]], actor: str) -> int:
+        """Append many type changes, then write the ledger once."""
+        if not changes:
+            return 0
+        allowed = set(allowed_types()) | {POSSIBLE_SPAM, IGNORED}
+        known = {item["id"] for item in defi_tags()}
+        with self._lock:
+            current = {row["id"]: row for row in self._effective_rows()}
+            lines = []
+            for change in changes:
+                row_id = str(change.get("row_id") or "")
+                row = current.get(row_id)
+                if row is None:
+                    raise DeskError("That transaction is not in the ledger.")
+                new_type = str(change.get("type") or "")
+                if new_type not in allowed:
+                    raise DeskError("Choose a BittyTax transaction type.")
+                tag = str(change.get("tag") or "").strip()
+                if tag and tag not in known:
+                    raise DeskError("Choose a DeFi tag from the rule file.")
+                why = str(change.get("why") or "").strip()
+                if not why:
+                    raise DeskError("Say why this type should change.")
+                if str(row["type"]) == new_type and tag == str(row.get("tag") or ""):
+                    continue
+                lines.append(
+                    {
+                        "row_id": row_id,
+                        "at": _stamp(),
+                        "who": actor or "local",
+                        "why": why[:500],
+                        "before_type": str(row["type"]),
+                        "after_type": new_type,
+                        "tag": tag,
+                    }
+                )
+            if not lines:
+                return 0
+            with (self.root / "reclassifications.jsonl").open("a", encoding="utf-8") as handle:
+                for entry in lines:
+                    handle.write(json.dumps(entry, ensure_ascii=True, sort_keys=True) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            self._write_effective_unlocked()
+        return len(lines)
 
     def change_log(self) -> List[Dict[str, str]]:
         path = self.root / "reclassifications.jsonl"
@@ -408,13 +456,17 @@ class Desk:
             cells = list(stored["cells"])
             change = changes.get(stored["id"])
             changed = change is not None
+            tag = ""
             if change is not None:
                 cells[0] = change["after_type"]
+                tag = str(change.get("tag") or "")
             for field, entry in fills.get(stored["id"], {}).items():
                 index = _VALUE_INDEX.get(field)
                 if index is not None:
                     cells[index] = entry["value"]
-            rows.append(_present(stored["id"], stored["import_id"], cells, changed))
+            packed = _present(stored["id"], stored["import_id"], cells, changed)
+            packed["tag"] = tag
+            rows.append(packed)
         return rows
 
     def _ledger_rows(self) -> List[Dict[str, Any]]:
@@ -464,12 +516,12 @@ def _present(row_id: str, import_id: str, cells: Sequence[str], changed: bool) -
 
 
 def _status(kind: str, changed: bool) -> str:
-    if changed:
-        return "reclassified"
     if kind == POSSIBLE_SPAM:
         return "spam"
     if kind in {NEEDS_REVIEW, IGNORED}:
         return "needs-review"
+    if changed:
+        return "reclassified"
     if kind.startswith("_"):
         return "unmapped"
     return "clear"
