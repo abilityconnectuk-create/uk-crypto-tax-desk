@@ -175,11 +175,13 @@ class Desk:
                 },
             )
             self._write_effective_unlocked()
+        from .koinly_labels import apply_koinly_labels  # pylint: disable=import-outside-toplevel
         from .matching import apply_auto_matches  # pylint: disable=import-outside-toplevel
         from .user_rules import apply_enabled_rules  # pylint: disable=import-outside-toplevel
 
         apply_auto_matches(self, who)
         apply_enabled_rules(self, who)
+        apply_koinly_labels(self, entry, who)
         return entry
 
     def imports(self) -> List[Dict[str, Any]]:

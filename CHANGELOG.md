@@ -9,6 +9,7 @@ The price data cache format has been updated to correctly distinguish assets tha
 The new `price_via_btc` config option may not exist in your config file. If it is missing, BittyTax keeps the legacy BTC-intermediate behaviour for backward compatibility. Add `price_via_btc: False` to your config if you want historic prices to use direct local currency lookups.
 
 ### Added
+- Local web desk: a Koinly full export is labelled from `config/koinly_labels.yaml`. Listed labels such as staking, airdrop, lending interest, cost, gift, lost, an internal transfer, and a swap set a BittyTax type and, where the table says so, a DeFi tag. A label that is not in the table stays for review.
 - Local web desk: Cost basis shows a balance timeline for each asset and names a likely gap (a missing deposit, an unmatched transfer, or a wallet that was not imported). The page only links to Import or Matches. It does not change the calculator.
 - Local web desk: the transaction list can relabel, tag, mark as spam, ignore, or undo several rows at once. A rules page stores "when wallet, asset, description or type matches, set type or tag". Rules show a preview, run again on demand, and run on import. Each change is logged.
 - Local web desk: withdrawals and deposits on the user's own wallets can be paired by asset, amount and a time window. A high score is matched automatically as a withdrawal and a deposit, which the calculator already treats as a transfer. Other pairs wait on a suggestion list with Accept, Reject and Unmatch. Each choice is appended to the log.

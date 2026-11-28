@@ -1,0 +1,33 @@
+# Editable Koinly label table for the local web desk.
+# A listed label sets the BittyTax type and, when present, a DeFi tag from the rule files.
+# A label that is not listed here stays for review. This file is not a tax rule.
+labels:
+  - names: [staking, stake reward, staking reward]
+    type: Staking-Reward
+    tag: staking_reward
+  - names: [airdrop]
+    type: Airdrop
+    tag: airdrop
+  - names: [lending interest]
+    type: Interest
+    tag: ""
+  - names: [cost]
+    type: Spend
+    tag: ""
+  - names: [gift]
+    direction: out
+    type: Gift-Sent
+    tag: ""
+  - names: [gift]
+    direction: in
+    type: Gift-Received
+    tag: ""
+  - names: [lost]
+    type: Lost
+    tag: ""
+  - names: [internal transfer, transfer]
+    type: ""
+    tag: own_wallet_transfer
+  - names: [swap, exchange]
+    type: Trade
+    tag: ""
