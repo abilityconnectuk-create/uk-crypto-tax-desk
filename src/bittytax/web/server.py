@@ -37,6 +37,7 @@ from .engine_run import supported_years
 from .errors import DeskError
 from .glossary import GLOSSARY
 from .identity import LOOPBACK, actor_for, trusted_tailscale_user
+from .import_inspect import find_problem, load_problems
 from .koinly_check import compare_year, load_uploads, store_uploads
 from .pack import pack_context, pack_lines, render_pdf
 from .planning import hypothetical, plan_view
@@ -58,6 +59,7 @@ from .sync import import_ethereum, import_kraken, secrets_present
 
 _STATIC = Path(__file__).resolve().parent / "static"
 _ROW_PATH = re.compile(r"^/transactions/([0-9A-Za-zT-]+)/([0-9]+)$")
+_PROBLEM_PATH = re.compile(r"^/import/problems/([0-9a-f]+)$")
 _ENV = jinja2.Environment(
     loader=jinja2.FileSystemLoader(Path(__file__).resolve().parent / "templates"),
     autoescape=jinja2.select_autoescape(["html"]),
@@ -208,17 +210,7 @@ def _handler_for(  # pylint: disable=too-many-statements
             parsed = urlparse(self.path)
             path = parsed.path
             query = parse_qs(parsed.query)
-            if path.startswith("/static/"):
-                self._static(path)
-                return
-            if path == "/login" and method == "GET":
-                self._login_get()
-                return
-            if path == "/login" and method == "POST":
-                self._login_post()
-                return
-            if path == "/logout" and method == "POST":
-                self._logout()
+            if self._special(method, path):
                 return
             row = _ROW_PATH.match(path)
             if row and method == "GET":
@@ -231,6 +223,7 @@ def _handler_for(  # pylint: disable=too-many-statements
                 ("GET", "/"): self._home,
                 ("GET", "/import"): self._import_form,
                 ("GET", "/import/add"): self._import_add,
+                ("GET", "/import/problems"): self._import_problems,
                 ("POST", "/import/detect"): self._import_detect,
                 ("POST", "/import"): self._import_post,
                 ("GET", "/transactions"): lambda: self._transactions(query),
@@ -258,6 +251,22 @@ def _handler_for(  # pylint: disable=too-many-statements
                 return
             handler()
 
+        def _special(self, method: str, path: str) -> bool:
+            problem = _PROBLEM_PATH.match(path)
+            if path.startswith("/static/"):
+                self._static(path)
+            elif path == "/login" and method == "GET":
+                self._login_get()
+            elif path == "/login" and method == "POST":
+                self._login_post()
+            elif path == "/logout" and method == "POST":
+                self._logout()
+            elif problem and method == "GET":
+                self._import_problem(problem.group(1))
+            else:
+                return False
+            return True
+
         def _home(self) -> None:
             query = parse_qs(urlparse(self.path).query)
             raw_year = _field(query, "tax_year")
@@ -278,7 +287,8 @@ def _handler_for(  # pylint: disable=too-many-statements
             )
 
         def _import_form(self) -> None:
-            chosen = _field(parse_qs(urlparse(self.path).query), "imported")
+            query = parse_qs(urlparse(self.path).query)
+            chosen = _field(query, "imported")
             summary = None
             wallets = []
             for item in desk.imports():
@@ -288,6 +298,8 @@ def _handler_for(  # pylint: disable=too-many-statements
                 wallets.append(packed)
                 if item["id"] == chosen:
                     summary = import_summary(item)
+                    if _field(query, "again") == "1":
+                        summary["idempotent"] = True
             self._page(
                 "import.html",
                 "Wallets",
@@ -295,6 +307,23 @@ def _handler_for(  # pylint: disable=too-many-statements
                 summary=summary,
                 wallets=wallets,
                 error="",
+                problems=load_problems(desk.root),
+            )
+
+        def _import_problems(self) -> None:
+            self._page(
+                "import_problems.html",
+                "Parser problems",
+                section="import",
+                problems=load_problems(desk.root),
+            )
+
+        def _import_problem(self, problem_id: str) -> None:
+            self._page(
+                "import_problem.html",
+                "Parser problem",
+                section="import",
+                problem=find_problem(desk.root, problem_id),
             )
 
         def _import_add(self) -> None:
@@ -313,8 +342,21 @@ def _handler_for(  # pylint: disable=too-many-statements
 
         def _import_post(self) -> None:
             filename, payload = _uploaded_file(self.headers.get("Content-Type", ""), self._req.raw)
-            entry = desk.import_bytes(filename, payload)
-            self._redirect(f"/import?imported={quote(entry['id'])}")
+            actor = actor_for(
+                self.headers,
+                self._req.client,
+                host=self._req.host_name,
+                session_user=self._req.session.user,
+            )
+            try:
+                entry = desk.import_known(filename, payload, actor)
+            except DeskError as exc:
+                if exc.problem_id:
+                    self._redirect(f"/import/problems/{quote(exc.problem_id)}")
+                    return
+                raise
+            again = "&again=1" if entry.get("idempotent") else ""
+            self._redirect(f"/import?imported={quote(entry['id'])}{again}")
 
         def _transactions(self, query: Mapping[str, List[str]]) -> None:
             filters = {

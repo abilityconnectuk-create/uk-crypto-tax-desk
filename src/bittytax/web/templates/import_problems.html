@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block body %}
+    <div class="page-head">
+        <div>
+            <h1>Parser problems</h1>
+            <p class="lede">Files the converter rejected. Each one opens as a redacted row pattern.</p>
+        </div>
+    </div>
+    <div class="card">
+        <table class="cards">
+            <thead>
+                <tr>
+                    <th>File</th>
+                    <th>Pattern</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in problems %}
+                    <tr>
+                        <td data-label="File">
+                            <a href="/import/problems/{{ item.id }}">{{ item.filename }}</a>
+                        </td>
+                        <td data-label="Pattern">{{ item.pattern|length }} cells</td>
+                    </tr>
+                {% else %}
+                    <tr>
+                        <td colspan="2">No parser problems stored.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock %}

@@ -90,7 +90,7 @@ bittytax_web --data-dir ~/Documents/crypto-tax --no-browser
 
 `UK_CRYPTO_TAX_DESK_DATA` sets the same directory when `--data-dir` is omitted. Put an optional `wallets.yaml` in that directory (start from `examples/wallets.example.yaml`). The Config page shows it and does not edit it. Do not commit a real `wallets.yaml` or the data directory.
 
-Each import keeps the original file, and records its SHA-256 hash, row count and date range. Changing a transaction type appends a line to a log (who, when, why). The report reads the derived ledger, not the raw file. Running the same report again on the same ledger produces the same figures. The default tax year is 2025/26 (6 April 2025 to 5 April 2026, Europe/London). 2024/25 still runs, including the calculator's 30 October 2024 split.
+Each import keeps the original file, and records its SHA-256 hash, row count and date range. The wallets page also lists rows skipped and why, unknown columns, date and number formats, and rows that repeat a row from another file. Uploading the same bytes again adds nothing. A file the converter rejects opens a parser-problem page: the row is shown as a pattern, and the amounts and addresses are not shown. Changing a transaction type appends a line to a log (who, when, why). The report reads the derived ledger, not the raw file. Running the same report again on the same ledger produces the same figures. The default tax year is 2025/26 (6 April 2025 to 5 April 2026, Europe/London). 2024/25 still runs, including the calculator's 30 October 2024 split.
 
 ### Manual check
 

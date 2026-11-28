@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from .convert import (
     IGNORED,
@@ -29,7 +29,16 @@ from .convert import (
 )
 from .engine_run import report_csv, run_tax_year
 from .errors import DeskError
+from .events import append_event
 from .health import analyse
+from .import_inspect import (
+    cross_file_duplicates,
+    inspect_bytes,
+    load_prints,
+    normalise_bytes,
+    record_problem,
+    store_prints,
+)
 from .rules import defi_tags
 
 PAGE_SIZE = 50
@@ -62,7 +71,30 @@ class Desk:
             return local
         return None
 
-    def import_bytes(self, filename: str, data: bytes) -> Dict[str, Any]:
+    def import_known(self, filename: str, data: bytes, who: str = "local") -> Dict[str, Any]:
+        """Import ``data``, or return the stored entry when those bytes are already here."""
+        if not data:
+            raise DeskError("The file is empty.")
+        digest = hashlib.sha256(data).hexdigest()
+        with self._lock:
+            for item in self.imports():
+                if item["sha256"] == digest:
+                    found = dict(item)
+                    found["idempotent"] = True
+                    append_event(
+                        self.root,
+                        "import-skip",
+                        who,
+                        "Same file already imported. No rows were added.",
+                        {"filename": _safe_name(filename), "import_id": str(item["id"])},
+                    )
+                    return found
+        entry = self.import_bytes(filename, data, who)
+        entry = dict(entry)
+        entry["idempotent"] = False
+        return entry
+
+    def import_bytes(self, filename: str, data: bytes, who: str = "local") -> Dict[str, Any]:
         if not data:
             raise DeskError("The file is empty.")
         name = _safe_name(filename)
@@ -78,18 +110,28 @@ class Desk:
             folder = self.raw_dir / import_id
             folder.mkdir(parents=True, exist_ok=False)
             raw_path = folder / name
-            saved = False
+            raw_path.write_bytes(data)
+            if hashlib.sha256(raw_path.read_bytes()).hexdigest() != digest:
+                raw_path.unlink()
+                folder.rmdir()
+                raise DeskError("The stored file does not match the upload.")
             try:
-                raw_path.write_bytes(data)
-                if hashlib.sha256(raw_path.read_bytes()).hexdigest() != digest:
-                    raise DeskError("The stored file does not match the upload.")
-                converted = convert_file(str(raw_path), _optional_path(self.wallets_path))
-                saved = True
-            finally:
-                if not saved:
-                    if raw_path.exists():
-                        raw_path.unlink()
-                    folder.rmdir()
+                converted, report = _convert_upload(raw_path, data, self.wallets_path)
+            except DeskError as exc:
+                _drop_raw(raw_path, folder)
+                problem = record_problem(self.root, name, data, "rejected")
+                append_event(
+                    self.root,
+                    "import-failed",
+                    who,
+                    "Import failed. A redacted parser problem was stored.",
+                    {"filename": name, "problem_id": str(problem["id"])},
+                )
+                raise DeskError(
+                    "The file could not be imported. Open the parser problem for the row pattern.",
+                    str(problem["id"]),
+                ) from exc
+            report["duplicates"] = cross_file_duplicates(converted.rows, load_prints(self.root))
             entry = _manifest_entry(
                 import_id,
                 name,
@@ -98,6 +140,7 @@ class Desk:
                 converted,
                 raw_path.relative_to(self.root).as_posix(),
             )
+            entry["report"] = _public_report(report)
             ledger = _read_json(self.root / "ledger.json", {"rows": []})
             review = _read_json(self.root / "review.json", {"imports": {}})
             start = len(ledger["rows"])
@@ -118,6 +161,19 @@ class Desk:
             _write_json(self.root / "ledger.json", ledger)
             _write_json(self.root / "review.json", review)
             _write_json(self.root / "imports.json", manifest)
+            store_prints(self.root, converted.rows, import_id, name)
+            append_event(
+                self.root,
+                "import",
+                who,
+                f"Imported {name}.",
+                {
+                    "import_id": import_id,
+                    "rows": str(len(converted.rows)),
+                    "skipped": str(len(report.get("skipped_reasons") or [])),
+                    "duplicates": str(len(report.get("duplicates") or [])),
+                },
+            )
             self._write_effective_unlocked()
         return entry
 
@@ -613,6 +669,59 @@ def _read_json(path: Path, default: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(loaded, dict):
         raise DeskError(f"{path.name} is not a desk file.")
     return loaded
+
+
+def _convert_upload(
+    raw_path: Path, data: bytes, wallets: Optional[Path]
+) -> Tuple[Conversion, Dict[str, Any]]:
+    report = inspect_bytes(raw_path.name, data)
+    try:
+        converted = convert_file(str(raw_path), _optional_path(wallets))
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        cleaned = normalise_bytes(data)
+        if cleaned is None:
+            raise DeskError("The converter rejected this file.") from exc
+        notes = list(report.get("normalised") or [])
+        notes.append("rewritten as comma-separated text for the parser")
+        report["normalised"] = notes
+        try:
+            converted = _convert_cleaned(raw_path, cleaned, wallets)
+        except Exception as cleaned_exc:  # pylint: disable=broad-exception-caught
+            raise DeskError("The converter rejected this file.") from cleaned_exc
+    return converted, report
+
+
+def _convert_cleaned(raw_path: Path, cleaned: bytes, wallets: Optional[Path]) -> Conversion:
+    temp = raw_path.with_name("_retry.csv")
+    try:
+        temp.write_bytes(cleaned)
+        return convert_file(str(temp), _optional_path(wallets))
+    finally:
+        if temp.exists():
+            temp.unlink()
+
+
+def _drop_raw(raw_path: Path, folder: Path) -> None:
+    if raw_path.exists():
+        raw_path.unlink()
+    if folder.exists():
+        folder.rmdir()
+
+
+def _public_report(report: Mapping[str, Any]) -> Dict[str, Any]:
+    keys = (
+        "parsed_rows",
+        "blank_rows",
+        "skipped_reasons",
+        "unknown_columns",
+        "date_problems",
+        "number_problems",
+        "duplicates",
+        "normalised",
+        "parser",
+        "delimiter",
+    )
+    return {key: report.get(key) for key in keys}
 
 
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
