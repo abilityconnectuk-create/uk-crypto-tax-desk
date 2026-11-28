@@ -18,8 +18,8 @@ SAMPLE = ROOT / "examples" / "web-sample-koinly.csv"
 def test_a_backup_restores_and_keeps_the_key_out_of_the_archive(tmp_path: Path) -> None:
     (tmp_path / "note.txt").write_text("sample note\n", encoding="utf-8")
     path = backup_now(tmp_path, "test")
-    assert os.stat(path).st_mode & 0o777 == 0o600
-    assert os.stat(tmp_path / "backup.key").st_mode & 0o777 == 0o600
+    _assert_owner_only(path)
+    _assert_owner_only(tmp_path / "backup.key")
     blob = path.read_bytes()
     assert b"sample note" not in blob
     assert b"backup.key" not in blob
@@ -35,6 +35,13 @@ def test_a_backup_restores_and_keeps_the_key_out_of_the_archive(tmp_path: Path) 
         assert "could not be read" in str(exc)
     else:
         raise AssertionError("a damaged backup should be refused")
+
+
+def _assert_owner_only(path: Path) -> None:
+    """Require mode 0600 where the system records a file mode."""
+    if os.name != "posix":
+        return
+    assert os.stat(path).st_mode & 0o777 == 0o600
 
 
 def test_retention_and_a_second_daily_start_do_not_pile_up(tmp_path: Path) -> None:
