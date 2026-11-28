@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block body %}
+    <h1>Koinly check</h1>
+    <p class="lede">Upload Koinly's capital gains summary and the complete tax report for one year. The files stay in the data directory on this computer. The numbers below are a comparison, not a filing position.</p>
+    <form method="post" action="/koinly" enctype="multipart/form-data">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label for="tax_year">Tax year</label>
+        <select id="tax_year" name="tax_year">
+            {% for item in years %}
+                <option value="{{ item.year }}"
+                        {% if item.year == tax_year %}selected{% endif %}>{{ item.label }}</option>
+            {% endfor %}
+        </select>
+        <label for="summary">
+            Capital gains summary CSV
+            <input id="summary" name="summary" type="file" accept=".csv,text/csv">
+        </label>
+        <label for="complete">
+            Complete tax report CSV
+            <input id="complete" name="complete" type="file" accept=".csv,text/csv">
+        </label>
+        <button type="submit">Compare</button>
+    </form>
+    {% if comparison %}
+        <p>Koinly totals taken from the {{ comparison.source }} file.</p>
+        <h2>Totals</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th></th>
+                    <th>Desk</th>
+                    <th>Koinly</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <th>Proceeds</th>
+                    <td>{{ comparison.desk.proceeds | gbp }}</td>
+                    <td>{{ comparison.koinly.proceeds | gbp }}</td>
+                </tr>
+                <tr>
+                    <th>Costs</th>
+                    <td>{{ comparison.desk.cost | gbp }}</td>
+                    <td>{{ comparison.koinly.cost | gbp }}</td>
+                </tr>
+                <tr>
+                    <th>Gain</th>
+                    <td>{{ comparison.desk.gain | gbp }}</td>
+                    <td>{{ comparison.koinly.gain | gbp }}</td>
+                </tr>
+            </tbody>
+        </table>
+        <h2>By asset</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Asset</th>
+                    <th>Desk proceeds</th>
+                    <th>Koinly proceeds</th>
+                    <th>Desk gain</th>
+                    <th>Koinly gain</th>
+                    <th>Gain difference</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in comparison.rows %}
+                    <tr {% if row.different %}class="diff"{% endif %}>
+                        <td>{{ row.asset }}</td>
+                        <td>{{ row.desk_proceeds | gbp }}</td>
+                        <td>{{ row.koinly_proceeds | gbp }}</td>
+                        <td>{{ row.desk_gain | gbp }}</td>
+                        <td>{{ row.koinly_gain | gbp }}</td>
+                        <td>{{ row.diff_gain | gbp }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% if comparison.complete_rows %}
+            <h2>Koinly lines</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Asset</th>
+                        <th>Type</th>
+                        <th>Cost</th>
+                        <th>Proceeds</th>
+                        <th>Gain</th>
+                        <th>Note</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in comparison.complete_rows %}
+                        <tr>
+                            <td>{{ row.date }}</td>
+                            <td>{{ row.asset }}</td>
+                            <td>{{ row.type }}</td>
+                            <td>{{ row.cost | gbp }}</td>
+                            <td>{{ row.proceeds | gbp }}</td>
+                            <td>{{ row.gain | gbp }}</td>
+                            <td>{{ row.description }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+    {% else %}
+        <p>No Koinly file stored for this year yet.</p>
+    {% endif %}
+{% endblock %}

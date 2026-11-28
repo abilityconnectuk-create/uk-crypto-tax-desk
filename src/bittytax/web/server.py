@@ -33,6 +33,7 @@ from .config_view import config_snapshot
 from .engine_run import supported_years
 from .errors import DeskError
 from .identity import LOOPBACK, actor_for, trusted_tailscale_user
+from .koinly_check import compare_year, load_uploads, store_uploads
 from .pack import pack_context, pack_lines, render_pdf
 from .rules import accountant_review_items
 from .sa108 import sa108_view
@@ -217,6 +218,8 @@ def _handler_for(  # pylint: disable=too-many-statements
                 ("GET", "/report/pack"): lambda: self._pack(query, pdf=False),
                 ("GET", "/report/pack.pdf"): lambda: self._pack(query, pdf=True),
                 ("GET", "/report.csv"): lambda: self._report_csv(query),
+                ("GET", "/koinly"): lambda: self._koinly(query),
+                ("POST", "/koinly"): self._koinly_post,
                 ("GET", "/config"): self._config,
                 ("GET", "/about"): self._about,
             }
@@ -371,6 +374,31 @@ def _handler_for(  # pylint: disable=too-many-statements
                     return
             self._page("pack.html", "Report pack", section="report", **context)
 
+        def _koinly(self, query: Mapping[str, List[str]]) -> None:
+            year = _year(_field(query, "tax_year"))
+            summary, complete = load_uploads(desk.root, year)
+            comparison = (
+                compare_year(desk.report(year), summary, complete) if summary or complete else None
+            )
+            self._page(
+                "koinly.html",
+                "Koinly",
+                section="koinly",
+                comparison=comparison,
+                years=supported_years(),
+                tax_year=year,
+            )
+
+        def _koinly_post(self) -> None:
+            fields, files = _parts(self.headers.get("Content-Type", ""), self._req.raw)
+            year = _year(fields.get("tax_year", ""))
+            summary = files.get("summary", ("", b""))[1]
+            complete = files.get("complete", ("", b""))[1]
+            if not summary and not complete:
+                raise DeskError("Choose a Koinly summary or a complete tax report.")
+            store_uploads(desk.root, year, summary, complete)
+            self._redirect(f"/koinly?tax_year={year}")
+
         def _report_csv(self, query: Mapping[str, List[str]]) -> None:
             year = _year(_field(query, "tax_year"))
             body = desk.report_csv(year).encode("utf-8")
@@ -499,20 +527,31 @@ def _form_value(form: Mapping[str, str], key: str) -> str:
 
 
 def _uploaded_file(content_type: str, body: bytes) -> Tuple[str, bytes]:
-    filename, _fields, payload = _multipart(content_type, body)
-    if payload is None:
+    _fields, files = _parts(content_type, body)
+    uploaded = files.get("file")
+    if uploaded is None and files:
+        uploaded = next(iter(files.values()))
+    if uploaded is None:
         raise DeskError("Choose a file to import.")
+    filename, payload = uploaded
     return filename or "upload.csv", payload
 
 
 def _multipart(content_type: str, body: bytes) -> Tuple[str, Dict[str, str], Optional[bytes]]:
+    fields, files = _parts(content_type, body)
+    if not files:
+        return "", fields, None
+    filename, payload = next(iter(files.values()))
+    return filename, fields, payload
+
+
+def _parts(content_type: str, body: bytes) -> Tuple[Dict[str, str], Dict[str, Tuple[str, bytes]]]:
     if "multipart/form-data" not in content_type:
         raise DeskError("The import form was not sent as a file upload.")
     header = f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8")
     message = BytesParser(policy=policy.default).parsebytes(header + body)
     fields: Dict[str, str] = {}
-    filename = ""
-    payload: Optional[bytes] = None
+    files: Dict[str, Tuple[str, bytes]] = {}
     if not message.is_multipart():
         raise DeskError("The import form was empty.")
     for part in message.iter_parts():
@@ -527,8 +566,7 @@ def _multipart(content_type: str, body: bytes) -> Tuple[str, Dict[str, str], Opt
             data = b""
         uploaded = part.get_filename()
         if uploaded:
-            filename = uploaded
-            payload = data
+            files[name] = (uploaded, data)
         else:
             fields[name] = data.decode("utf-8", errors="replace")
-    return filename, fields, payload
+    return fields, files
