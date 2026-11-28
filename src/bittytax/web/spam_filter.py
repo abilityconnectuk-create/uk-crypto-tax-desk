@@ -19,7 +19,7 @@ from ..conv.txref import related_official
 from .convert import POSSIBLE_SPAM
 from .errors import DeskError
 
-LABEL = "awaiting tax review"
+LABEL = "confirmed"
 OFFICIAL = ("BTC", "ETH", "SOL", "USDT", "USDC", "USDF", "RLUSD")
 _DUST = Decimal("0.001")
 _ADDRESS = re.compile(r"(0x[0-9A-Fa-f]{16,}|bc1[a-z0-9]{10,})")

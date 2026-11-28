@@ -81,11 +81,16 @@ def method_statement(tax_year: int) -> str:
             "The 30-day window crosses 5 April into the next tax year. "
             "The gain stays in the year of the disposal."
         ),
-        "Fees: an acquisition fee is added to cost. A disposal fee reduces proceeds.",
-        "Gas paid in a token is a small disposal of that token, on that token's own pool.",
         (
-            "Futures and perpetuals are reported on their own. "
-            "Where they sit on the return is an open question."
+            "Fees: an acquisition fee is added to cost (section 38(1)(a)). "
+            "A disposal fee is an allowable cost (section 38(1)(c)) and goes in box 13.3. "
+            "Box 13.2 stays gross. Swap fees are split in half."
+        ),
+        "Gas paid in a token is a disposal of that token, on that token's own pool.",
+        (
+            "Futures and perpetuals on a non-recognised exchange are miscellaneous income "
+            "on SA100 page TR3, boxes 17 and 18. They are not SA108 crypto boxes. "
+            "A loss only reduces later miscellaneous income of the same type."
         ),
         "",
         "DeFi rules",
@@ -94,9 +99,11 @@ def method_statement(tax_year: int) -> str:
         if not isinstance(tag, dict):
             continue
         note = " ".join(str(tag.get("note") or "").split())
+        confirmed = "true" if tag.get("confirmed") else "false"
+        banner = "" if tag.get("confirmed") else f" {_BANNER}."
         lines.append(
             f"{tag.get('label', tag.get('id', ''))}: {note} "
-            f"Manual: {tag.get('manual', '')}. Confirmed: false. {_BANNER}."
+            f"Manual: {tag.get('manual', '')}. Confirmed: {confirmed}.{banner}"
         )
     return "\n".join(lines) + "\n"
 
@@ -143,31 +150,27 @@ def _questions(tax_year: int, desk: Any) -> str:
     lines = ["Open questions for the accountant", _BANNER]
     for item in accountant_review_items(tax_year):
         lines.append(f"{item.get('title', '')}: {item.get('detail', '')}")
-    lines.append("Futures and perpetuals: where they sit on the return is an open question.")
-    lines.append(
-        "Trading allowance: the 1000 check is shown and is not deducted. "
-        "Whether it applies is an open question."
-    )
-    lines.append(
-        "Income airdrops: income only when received for a service. That is an open question."
-    )
     path = desk.root / "negligible-claims.json"
     if path.is_file() and path.stat().st_size > 2:
-        lines.append("Negligible-value claims are marked accountant-only. No loss was posted.")
+        lines.append("Negligible-value claims post a deemed disposal of the whole pool.")
     return "\n".join(lines) + "\n"
 
 
 def _box53(sa108: Optional[Mapping[str, Any]]) -> str:
-    note = "Box 53 is the estimates and valuations flag. An accountant decides whether to set it."
+    note = (
+        "Box 53 is X when any event is valued from a price source rather than "
+        "actual sterling consideration. That includes every token-to-token swap. "
+        "The method statement is box 54."
+    )
+    flag = ""
     if sa108:
         for box in sa108.get("boxes") or []:
-            if str(box.get("box")) == "53" and box.get("note"):
-                note = str(box["note"]).strip()
-    return (
-        f"{_BANNER}\nBox 53 estimates and valuations.\n{note}\n"
-        "The desk does not set the flag. Prices and other valuations used in the "
-        "calculations are listed with their source.\n"
-    )
+            if str(box.get("box")) == "53":
+                flag = str(box.get("value") or "")
+                if box.get("note"):
+                    note = str(box["note"]).strip()
+    shown = flag or "blank"
+    return f"Box 53 estimates and valuations: {shown}.\n{note}\nThe method statement is box 54.\n"
 
 
 def _pools(pools: Mapping[str, Any]) -> str:

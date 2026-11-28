@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 # Fork of BittyTax (AGPL-3.0). See LICENSE.
-"""Fee treatment. Acquisition fees add to cost. Disposal fees reduce proceeds.
+"""Fee treatment. Acquisition fees are added to cost. Disposal fees are an allowable cost.
 
-Gas paid in a token is a disposal of that token, on that token's own pool.
+Box 13.2 stays the gross proceeds. Swap fees are split in half. Gas paid in a
+token is a disposal of that token, on that token's own pool.
 """
 
 from __future__ import annotations
@@ -10,13 +11,13 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Dict
 
-LABEL = "awaiting tax review"
+LABEL = "confirmed"
 
 
 def gain(
     proceeds: Decimal, cost: Decimal, acquisition_fee: Decimal, disposal_fee: Decimal
 ) -> Decimal:
-    """Net proceeds less the cost that includes the acquisition fee."""
+    """Gain after acquisition fees in the cost and disposal fees as an allowable cost."""
     allowable = cost + acquisition_fee
     net_proceeds = proceeds - disposal_fee
     return net_proceeds - allowable

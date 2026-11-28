@@ -88,7 +88,7 @@
             Status <span class="status {% if row.status == 'clear' %}ok{% else %}amber{% endif %}">{{ row.status }}</span>
         </p>
         {% if row.tag %}<p>DeFi tag {{ row.tag }}</p>{% endif %}
-        <p class="banner">AWAITING TAX REVIEW. A DeFi tag is a note on the row. It does not change the calculator type.</p>
+        <p class="banner">A confirmed DeFi tag can change the calculator type. Rebasing stays with the accountant.</p>
         {% if row.tag_note %}<p>{{ row.tag_note }}</p>{% endif %}
         <form class="stack"
               method="post"

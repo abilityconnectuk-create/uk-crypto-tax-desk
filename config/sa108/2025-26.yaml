@@ -21,64 +21,70 @@ boxes:
     label: Number of disposals
     engine_field: disposals
     accountant_review: false
-    confirmed: false
+    confirmed: true
     note: >
-      A disposal count is the number of capital-gains disposals after
-      same-day matching, then the next 30 days, then the section 104 pool.
-      A transfer between the person's own wallets is not counted. The desk
-      count is shown beside the count from an imported Koinly file.
-      This wording is awaiting tax review.
+      Count one disposal per token per day, using the pooled same-day sell,
+      plus each disposal the same-day pool does not cover. Slices of that one
+      disposal are not counted again. A transfer between the person's own
+      wallets is not counted. The desk count is shown beside the Koinly count.
   - box: "13.2"
     key: proceeds
     label: Disposal proceeds
     engine_field: proceeds
     accountant_review: false
-    confirmed: false
+    confirmed: true
   - box: "13.3"
     key: allowable_costs
     label: Allowable costs (including purchase price)
     engine_field: allowable_costs
     accountant_review: false
-    confirmed: false
+    confirmed: true
   - box: "13.4"
     key: gains_before_losses
     label: Gains in the year, before losses
     engine_field: total_gain
     accountant_review: false
-    confirmed: false
+    confirmed: true
+    note: >
+      Net the slices of one disposal first, then put that result in box 13.4
+      or box 13.5. Do not split one disposal across both boxes.
   - box: "13.5"
     key: losses
     label: Losses in the year
     engine_field: losses
     accountant_review: false
-    confirmed: false
+    confirmed: true
+    note: >
+      A loss here is the net loss on one disposal after its slices are combined.
   - box: "13.6"
     key: claim_code
     label: Claim or election code
     engine_field: ""
-    accountant_review: true
-    confirmed: false
-    note: The claim or election code is not calculated. An accountant completes box 13.6.
+    accountant_review: false
+    confirmed: true
+    note: >
+      NVC when a negligible-value claim is recorded. MUL when more than one
+      code applies. Blank otherwise.
   - box: "13.7"
     key: real_time_result
     label: Real Time Transaction result
     engine_field: ""
-    accountant_review: true
-    confirmed: false
+    accountant_review: false
+    confirmed: true
     note: Box 13.7 is the Real Time Transaction gain or loss already reported. The calculator does not store it.
   - box: "13.8"
     key: real_time_tax_paid
     label: Tax already paid on the Real Time Transaction result
     engine_field: ""
-    accountant_review: true
-    confirmed: false
+    accountant_review: false
+    confirmed: true
     note: Box 13.8 is tax already paid on the Real Time Transaction result. The calculator does not store it.
   - box: "45"
     key: losses_brought_forward
     label: Losses brought forward
     engine_field: ""
-    accountant_review: true
-    confirmed: false
+    accountant_review: false
+    confirmed: true
     note: >
       Losses brought forward go in box 45. They only reduce gains down to the
       annual exempt amount. The calculator does not keep this balance.
@@ -86,30 +92,42 @@ boxes:
     key: losses_carried_forward
     label: Losses carried forward
     engine_field: ""
-    accountant_review: true
-    confirmed: false
-    note: Losses carried forward go in box 47. The calculator does not keep this balance.
+    accountant_review: false
+    confirmed: true
+    note: >
+      Losses carried forward go in box 47. An unclaimed loss is dropped once
+      its four-year deadline has passed, and is shown as lost.
   - box: "53"
     key: estimates_flag
     label: Estimates and valuations
     engine_field: ""
-    accountant_review: true
-    confirmed: false
-    note: Box 53 is the estimates and valuations flag. An accountant decides whether to set it.
+    accountant_review: false
+    confirmed: true
+    note: >
+      Set X when any event is valued from a price source rather than actual
+      sterling consideration, including every token-to-token swap. The method
+      statement goes in box 54.
+  - box: "54"
+    key: method_statement
+    label: Method statement
+    engine_field: ""
+    accountant_review: false
+    confirmed: true
+    note: The method statement for the valuations in box 53.
 annual_exempt_amount:
   value: "3000"
-  confirmed: false
+  confirmed: true
   deduct_from_boxes: false
   note: Display only. Do not deduct it from boxes 13.1 to 13.5.
 reporting_trigger:
   proceeds_over: "50000"
   gains_over: "3000"
-  confirmed: false
+  confirmed: true
   note: >
     Reporting is indicated when disposal proceeds are over 50000 or gains
     are over 3000. This is not a four-times allowance test.
 split:
   applies: false
   date: ""
-  confirmed: false
+  confirmed: true
   note: No in-year rate split is recorded for this year.

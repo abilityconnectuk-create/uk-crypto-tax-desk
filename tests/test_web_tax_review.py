@@ -32,7 +32,7 @@ from bittytax.web.missing_cost_report import in_window
 from bittytax.web.pools import separate, stablecoins_merged
 from bittytax.web.queues import export_rows, save_gap
 from bittytax.web.rule_versions import history, record, refuse_remote_write
-from bittytax.web.rules import confirmed_flags, load_rules
+from bittytax.web.rules import load_rules
 from bittytax.web.server import bind_server
 from bittytax.web.spam_filter import (
     drop_rows,
@@ -62,7 +62,7 @@ def test_sterling_value_keeps_the_source_and_refuses_a_year_end_rate() -> None:
     assert valued["price"] == "50"
     assert valued["fx_source"] == "event FX rate"
     assert valued["manual"] == "CRYPTO23000"
-    assert valued["confirmed"] == "false"
+    assert valued["confirmed"] == "true"
     try:
         sterling_value(
             {"quantity": "1", "usd_total": "100", "fx_rate": "0.8", "year_end_rate": True}
@@ -270,12 +270,15 @@ def test_income_schedule_checks_the_allowance_and_carries_cost() -> None:
         }
     ]
     schedule_view = build_schedule(report, rows, 2026)
-    assert schedule_view["allowance_deducted"] is False
+    assert schedule_view["allowance_deducted"] is True
     assert schedule_view["total"] == "1041.00"
     assert schedule_view["above_allowance"] is True
+    assert schedule_view["box_17"] == "1041.00"
+    assert schedule_view["box_18"] == "1000.00"
+    assert schedule_view["taxable"] == "41.00"
+    assert schedule_view["placement"].startswith("SA100")
     assert {row["token_cost"] for row in schedule_view["rows"]} == {"1000.00", "16.00", "25.00"}
-    assert all(row["open_question"] for row in schedule_view["rows"])
-    assert schedule_view["confirmed"] is False
+    assert schedule_view["confirmed"] is True
 
 
 def test_futures_comparison_does_not_change_the_capital_figure() -> None:
@@ -292,8 +295,11 @@ def test_futures_comparison_does_not_change_the_capital_figure() -> None:
     assert plain["comparison_gains"] == "100.00"
     assert compared["comparison_gains"] == "125.00"
     assert compared["capital_gains"] == "100.00"
+    assert compared["box_17"] == "25.00"
+    assert compared["box_18"] == "4.00"
+    assert compared["sa108_crypto"] is False
     assert compared["filed_changed"] is False
-    assert "open question" in compared["open_question"]
+    assert "SA100" in compared["note"]
 
 
 def test_spam_filter_logs_and_restores(tmp_path: Path) -> None:
@@ -327,11 +333,18 @@ def test_queues_allocations_and_versions(tmp_path: Path) -> None:
     linked = link_manually(tmp_path, "pay-1", "claim-1", "sam")
     assert linked["confirmed"] == "false"
     refunded = apply_refund("80", "30")
-    assert refunded["pending"] == "50"
-    assert refunded["loss_posted"] == "false"
-    claim = mark_negligible(tmp_path, "pay-1", "sam")
-    assert claim["status"] == "accountant-only"
-    assert claim["loss_posted"] == "false"
+    assert refunded["proceeds"] == "30"
+    assert refunded["shortfall_loss"] == "50"
+    assert refunded["loss_posted"] == "true"
+    assert refunded["stablecoin_acquired_at"] == "30"
+    claim = mark_negligible(
+        tmp_path, "SAMPLE", "sam", value="0", on_date="2026-06-01", pool_cost="40"
+    )
+    assert claim["status"] == "claimed"
+    assert claim["claim_code"] == "NVC"
+    assert claim["loss_posted"] == "true"
+    assert claim["loss"] == "40"
+    assert claim["whole_pool"] == "true"
     first = record(tmp_path, "sam", "Approved a manual override.", "override")
     second = record(tmp_path, "sam", "Approved another override.", "override")
     assert first["version"] == "1"
@@ -357,9 +370,12 @@ def test_loss_deadlines_and_claim_status(tmp_path: Path) -> None:
     assert not schedule(desk)
     rules = load_rules(2026)
     assert rules is not None
-    assert rules["desk_review"]["confirmed"] is False
-    assert rules["desk_review"]["label"] == "awaiting tax review"
-    assert all(flag is False for flag in confirmed_flags(rules))
+    assert rules["desk_review"]["matching"]["confirmed"] is True
+    assert rules["desk_review"]["sterling"]["confirmed"] is True
+    assert rules["desk_review"]["pooling"]["confirmed"] is True
+    rebasing = next(tag for tag in rules["defi"]["tags"] if tag["id"] == "rebasing")
+    assert rebasing["confirmed"] is False
+    assert rebasing["accountant_review"] is True
 
 
 def test_accountant_pack_contains_the_review_sections(tmp_path: Path) -> None:

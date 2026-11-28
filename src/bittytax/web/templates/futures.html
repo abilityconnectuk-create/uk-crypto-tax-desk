@@ -3,12 +3,11 @@
     <div class="page-head">
         <div>
             <h1>Futures and perpetuals</h1>
-            <p class="lede">Realised result, trading fees and funding fees are kept apart from the capital-gains figures.</p>
+            <p class="lede">Realised result, trading fees and funding fees are miscellaneous income, not SA108 crypto boxes.</p>
         </div>
     </div>
-    <p class="banner">AWAITING TAX REVIEW</p>
     <section class="card pad">
-        <p class="warn">{{ view.report.open_question }}</p>
+        <p>{{ view.report.note }}</p>
         <form method="post" action="/futures" class="filters">
             <input type="hidden" name="csrf" value="{{ csrf }}">
             <input type="hidden" name="tax_year" value="{{ tax_year }}">
@@ -39,6 +38,18 @@
             <tr>
                 <th>Funding fees</th>
                 <td>{{ view.report.funding_fees | gbp }}</td>
+            </tr>
+            <tr>
+                <th>SA100 TR3 box 17 income</th>
+                <td>{{ view.report.box_17 | gbp }}</td>
+            </tr>
+            <tr>
+                <th>SA100 TR3 box 18 expenses</th>
+                <td>{{ view.report.box_18 | gbp }}</td>
+            </tr>
+            <tr>
+                <th>Miscellaneous loss, same type only</th>
+                <td>{{ view.report.miscellaneous_loss | gbp }}</td>
             </tr>
             <tr>
                 <th>Capital gains on the return</th>

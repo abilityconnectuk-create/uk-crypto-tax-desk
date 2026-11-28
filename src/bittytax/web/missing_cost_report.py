@@ -10,7 +10,7 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-LABEL = "awaiting tax review"
+LABEL = "confirmed"
 _PENCE = Decimal("0.01")
 
 
@@ -62,7 +62,7 @@ def build_report(
         "gap_effect": f"{gap_gain.quantize(_PENCE)}",
         "worth_used_as_cost": False,
         "label": LABEL,
-        "confirmed": False,
+        "confirmed": True,
         "note": (
             "These disposals have no cost basis. The gain is the calculator's figure "
             "at the cost it has, including zero. Worth is not written in as the cost."

@@ -22,7 +22,7 @@ import jinja2
 from ..report import ReportLog
 from . import DEFAULT_TAX_YEAR
 from .accountant_pack import build_zip
-from .allocation_desk import link_manually, mark_negligible
+from .allocation_desk import claim_codes, link_manually, mark_negligible
 from .auth import (
     DeskAuth,
     Session,
@@ -690,7 +690,17 @@ def _handler_for(  # pylint: disable=too-many-statements
                 "Tax reports",
                 section="report",
                 report=report,
-                sa108=sa108_view(report, year, for_year(desk, year)) if report else None,
+                sa108=(
+                    sa108_view(
+                        report,
+                        year,
+                        for_year(desk, year),
+                        rows=desk.all_rows(),
+                        claim_codes=claim_codes(desk.root),
+                    )
+                    if report
+                    else None
+                ),
                 years=supported_years(),
                 tax_year=year,
                 year_label=label,
@@ -844,11 +854,20 @@ def _handler_for(  # pylint: disable=too-many-statements
             form = self._req.form
             who = self._actor()
             if form.get("action") == "negligible":
-                mark_negligible(desk.root, form.get("payment", ""), who)
+                mark_negligible(
+                    desk.root,
+                    form.get("asset") or form.get("payment", ""),
+                    who,
+                    value=form.get("value", "0"),
+                    on_date=form.get("on_date", ""),
+                    pool_cost=form.get("pool_cost", "0"),
+                    earlier_date=form.get("earlier_date", ""),
+                    lost_key=form.get("lost_key") == "yes",
+                )
                 record(
                     desk.root,
                     who,
-                    "Marked a negligible-value claim as accountant-only.",
+                    "Recorded a negligible-value claim for the whole pool.",
                     "override",
                 )
             else:

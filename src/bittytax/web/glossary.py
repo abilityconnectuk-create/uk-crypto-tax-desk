@@ -40,7 +40,8 @@ GLOSSARY: Dict[str, Dict[str, str]] = {
         "term": "SA108 boxes",
         "text": (
             "SA108 is the capital gains summary in Self Assessment. The box numbers "
-            "here are copied from the rule file and are not confirmed. This is not advice."
+            "here are copied from the rule file. Confirmed entries are marked "
+            "there. This is not advice."
         ),
     },
     "annual_exempt": {

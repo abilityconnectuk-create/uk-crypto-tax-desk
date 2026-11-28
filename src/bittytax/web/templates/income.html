@@ -3,26 +3,22 @@
     <div class="page-head">
         <div>
             <h1>Income</h1>
-            <p class="lede">
-                Staking, DeFi returns and income airdrops for the main return.
-                This schedule is kept apart from SA108. The trading allowance is a check and is not deducted.
-            </p>
+            <p class="lede">Staking, DeFi returns and income airdrops for SA100 page TR3. This schedule is kept apart from SA108.</p>
         </div>
     </div>
-    <p class="banner">AWAITING TAX REVIEW</p>
     {% if view.error %}<p class="warn">{{ view.error }}</p>{% endif %}
     <section class="card pad">
         <p>{{ view.schedule.note }}</p>
-        <p class="warn">{{ view.schedule.open_question }}</p>
         <p>
             Schedule total {{ view.schedule.total | gbp }}.
-            Trading allowance check {{ view.schedule.allowance | gbp }}.
-            {% if view.schedule.above_allowance %}
-                The total is above that check.
-            {% else %}
-                The total is within that check.
+            Trading allowance {{ view.schedule.allowance | gbp }}.
+            Box 17 {{ view.schedule.box_17 | gbp }}.
+            Box 18 {{ view.schedule.box_18 | gbp }}.
+            {% if view.schedule.exempt %}
+                The receipts are exempt and are not reported.
+            {% elif view.schedule.above_allowance %}
+                The total is above the allowance.
             {% endif %}
-            The allowance is not deducted.
         </p>
     </section>
     <table>

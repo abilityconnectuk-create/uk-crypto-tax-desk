@@ -20,14 +20,16 @@ _TRANSFER = "transfer"
 _CONDITIONAL = {
     "accountant_review",
     "income_only_for_a_service",
-    "disposal_if_beneficial_ownership_passes",
-    "disposal_of_receipt_token",
 }
 _TYPE_FOR_EFFECT = {
     "acquisition_at_repayment_obligation": "Loan",
-    "disposal_at_market_value": "Loan-Repayment",
-    "disposal_at_MV": "Loan-Repayment",
+    "disposal_at_market_value": "Spend",
+    "disposal_at_MV": "Spend",
     "miscellaneous_income": "Staking-Reward",
+    "defi_miscellaneous_income": "Interest",
+    "exchange_at_market_value": "Trade",
+    "disposal_for_a_right": "Spend",
+    "acquisition_at_market_value": "Gift-Received",
     "not_disposal": _TRANSFER,
 }
 
@@ -163,9 +165,22 @@ def _type_for(row: Mapping[str, Any], spec: Optional[Mapping[str, Any]]) -> str:
     if not spec or not spec.get("confirmed"):
         return ""
     effect = _effect(spec, str(row.get("wallet") or ""))
-    if effect in _CONDITIONAL:
+    if effect in _CONDITIONAL or not effect:
         return ""
+    special = {
+        "by_arrival": _by_arrival,
+        "follows_deposit_withdrawal": _withdrawal_type,
+        "follows_deposit_liquidation": _liquidation_type,
+    }
+    if effect in special:
+        return special[effect](row)
+    return _mapped_type(effect, row)
+
+
+def _mapped_type(effect: str, row: Mapping[str, Any]) -> str:
     mapped = _TYPE_FOR_EFFECT.get(effect, "")
+    if mapped == "Trade":
+        return _exchange_type(row)
     if mapped == _TRANSFER:
         return _transfer_type(row)
     return mapped
@@ -174,11 +189,65 @@ def _type_for(row: Mapping[str, Any], spec: Optional[Mapping[str, Any]]) -> str:
 def _effect(spec: Mapping[str, Any], wallet: str) -> str:
     options = spec.get("options")
     if isinstance(options, list) and options:
-        raw = spec.get("protocols")
-        protocols: Dict[str, Any] = raw if isinstance(raw, dict) else {}
-        chosen = protocols.get(wallet) or spec.get("default") or spec.get("effect")
-        return str(chosen or "")
+        return _protocol(spec, wallet)
     return str(spec.get("effect") or "")
+
+
+def _protocol(spec: Mapping[str, Any], wallet: str) -> str:
+    raw = spec.get("protocols")
+    protocols: Dict[str, Any] = raw if isinstance(raw, dict) else {}
+    folded = wallet.casefold()
+    for key, value in protocols.items():
+        name = str(key).casefold()
+        if name and (name == folded or name in folded or folded in name):
+            return str(value)
+    default = spec.get("default")
+    if default:
+        return str(default)
+    return ""
+
+
+def _exchange_type(row: Mapping[str, Any]) -> str:
+    buy = str(row.get("buy_asset") or "")
+    sell = str(row.get("sell_asset") or "")
+    if buy and sell:
+        return "Trade"
+    if sell:
+        return "Spend"
+    return ""
+
+
+def _by_arrival(row: Mapping[str, Any]) -> str:
+    """Separate reward tokens are income. Yield inside a receipt is capital."""
+    note = str(row.get("note") or "").casefold()
+    buy = str(row.get("buy_asset") or "")
+    sell = str(row.get("sell_asset") or "")
+    if sell and ("receipt" in note or "share" in note or buy):
+        return ""
+    if buy and not sell:
+        return "Interest"
+    return ""
+
+
+def _withdrawal_type(row: Mapping[str, Any]) -> str:
+    choice = _deposit_choice(row)
+    if choice == "disposal_at_MV":
+        return "Gift-Received"
+    return ""
+
+
+def _liquidation_type(row: Mapping[str, Any]) -> str:
+    choice = _deposit_choice(row)
+    if choice == "not_disposal":
+        return "Spend"
+    return ""
+
+
+def _deposit_choice(row: Mapping[str, Any]) -> str:
+    spec = _spec("collateral_deposit", _year(row))
+    if spec is None or not spec.get("confirmed"):
+        return ""
+    return _protocol(spec, str(row.get("wallet") or ""))
 
 
 def _transfer_type(row: Mapping[str, Any]) -> str:

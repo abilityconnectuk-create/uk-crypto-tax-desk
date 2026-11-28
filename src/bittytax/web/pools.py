@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
-LABEL = "awaiting tax review"
+LABEL = "confirmed"
 MANUAL = "CRYPTO22200"
 STABLECOINS = ("USDT", "USDC", "USDF", "RLUSD")
 

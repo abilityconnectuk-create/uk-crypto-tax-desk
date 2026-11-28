@@ -11,7 +11,6 @@ from urllib.request import urlopen
 
 from bittytax.web.rules import (
     accountant_review_items,
-    confirmed_flags,
     list_rule_years,
     load_rules,
     load_sa108,
@@ -35,8 +34,14 @@ def test_mappings_stay_unconfirmed_and_use_the_crypto_boxes_only() -> None:
         rules = load_rules(ending)
         assert sa108 is not None
         assert rules is not None
-        assert confirmed_flags(sa108) and all(flag is False for flag in confirmed_flags(sa108))
-        assert confirmed_flags(rules) and all(flag is False for flag in confirmed_flags(rules))
+        assert sa108["confirmed"] is False
+        assert rules["defi"]["tags"]
+        rebasing = next(tag for tag in rules["defi"]["tags"] if tag["id"] == "rebasing")
+        assert rebasing["confirmed"] is False
+        assert rebasing["accountant_review"] is True
+        boxes_by_number = {item["box"]: item for item in sa108["boxes"]}
+        assert boxes_by_number["13.2"]["confirmed"] is True
+        assert boxes_by_number["13.3"]["confirmed"] is True
         boxes = {str(item["box"]) for item in sa108["boxes"]}
         assert {"13.1", "13.2", "13.3", "13.4", "13.5", "13.6", "13.7", "13.8"} <= boxes
         assert boxes.isdisjoint(_FORBIDDEN)
@@ -92,10 +97,7 @@ def test_2024_25_tags_disposals_around_30_october() -> None:
     assert view["split"]["rates_before"] == "10% and 20%"
     assert view["split"]["rates_after"] == "18% and 24%"
     titles = [item["title"] for item in accountant_review_items(2025)]
-    assert "SA108 box 53" in titles
-    assert "SA108 box 51" in titles
-    assert "SA108 box 45" in titles
-    assert "SA108 box 47" in titles
+    assert titles == ["Rebasing receipt token"]
 
 
 def test_report_page_shows_the_unconfirmed_banner(tmp_path: Path) -> None:
@@ -120,7 +122,7 @@ def test_report_page_shows_the_unconfirmed_banner(tmp_path: Path) -> None:
     assert "13.5" in page
     assert "2024-10-30" in page
     assert _SA108 in page
-    assert "SA108 box 53" in health
+    assert "Rebasing receipt token" in health
     assert any(item["slug"] == "2024-25" for item in list_rule_years())
 
 

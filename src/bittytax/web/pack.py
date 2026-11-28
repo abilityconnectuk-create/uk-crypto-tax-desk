@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
+from .allocation_desk import claim_codes
 from .rules import accountant_review_items
 from .sa108 import sa108_view
 
@@ -18,7 +19,9 @@ def pack_context(desk: Any, tax_year: int) -> Dict[str, Any]:
     return {
         "tax_year": tax_year,
         "report": report,
-        "sa108": sa108_view(report, tax_year),
+        "sa108": sa108_view(
+            report, tax_year, rows=_all_rows(desk), claim_codes=claim_codes(desk.root)
+        ),
         "health": desk.health(tax_year),
         "accountant_review": accountant_review_items(tax_year),
         "transactions": _all_rows(desk),

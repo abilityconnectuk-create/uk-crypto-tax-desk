@@ -11,7 +11,7 @@ from datetime import date, timedelta
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 MANUAL = "CRYPTO22200"
-LABEL = "awaiting tax review"
+LABEL = "confirmed"
 MATCHING_ORDER = ("same day", "next 30 days", "section 104 pool")
 
 
@@ -69,11 +69,11 @@ def from_report(report: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
         "order": list(MATCHING_ORDER),
         "manual": MANUAL,
         "label": LABEL,
-        "confirmed": False,
+        "confirmed": True,
         "rows": rows,
         "note": (
             "Matching runs same day, then the next 30 days, then the section 104 pool. "
             "The 30-day window crosses 5 April into the next tax year. "
-            "The gain stays in the tax year of the disposal. Awaiting tax review."
+            "The gain stays in the tax year of the disposal."
         ),
     }

@@ -21,7 +21,7 @@ _PENCE = Decimal("0.01")
 _USD = re.compile(r"USD\s+([0-9]+(?:\.[0-9]+)?)")
 _RATE = re.compile(r"FX\s+([0-9]+(?:\.[0-9]+)?)\s+([A-Za-z0-9 ._-]{1,40})")
 MANUAL = "CRYPTO23000"
-LABEL = "awaiting tax review"
+LABEL = "confirmed"
 
 
 class YearEndRateError(DeskError):
@@ -49,7 +49,7 @@ def sterling_value(event: Mapping[str, object]) -> Dict[str, str]:
         "fx_source": used,
         "manual": MANUAL,
         "label": LABEL,
-        "confirmed": "false",
+        "confirmed": "true",
     }
 
 
@@ -92,7 +92,7 @@ def record_valuations(root: Path, rows: Sequence[Mapping[str, str]]) -> None:
     payload = {
         "manual": MANUAL,
         "label": LABEL,
-        "confirmed": False,
+        "confirmed": True,
         "rows": list(rows),
     }
     path = root / "valuations.json"

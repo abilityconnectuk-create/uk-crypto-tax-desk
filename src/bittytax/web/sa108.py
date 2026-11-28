@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from .rules import load_sa108
 
@@ -16,6 +16,8 @@ def sa108_view(
     report: Mapping[str, Any],
     ending_year: int,
     losses: Optional[Mapping[str, str]] = None,
+    rows: Optional[Sequence[Mapping[str, Any]]] = None,
+    claim_codes: Optional[Sequence[str]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Boxes for one report. ``None`` when that year has no mapping file."""
     spec = load_sa108(ending_year)
@@ -24,6 +26,9 @@ def sa108_view(
     summary = report.get("summary") or {}
     boxes = [_box(item, summary) for item in spec.get("boxes", []) if isinstance(item, dict)]
     _fill_loss_boxes(boxes, losses or {})
+    _fill_disposal_boxes(boxes, list(report.get("disposals") or []))
+    _fill_claim_code(boxes, claim_codes or [])
+    _fill_estimates(boxes, rows or [])
     allowance = spec.get("annual_exempt_amount") or {}
     trigger = _trigger(spec.get("reporting_trigger") or {}, summary)
     return {
@@ -44,6 +49,111 @@ def sa108_view(
         "trigger": trigger,
         "split": _split(spec.get("split") or {}, summary, report.get("disposals") or []),
     }
+
+
+_SLICE_WORDS = ("same day", "breakfast", "section 104", "ten day")
+
+
+def grouped_crypto_boxes(disposals: Sequence[Mapping[str, Any]]) -> Optional[Dict[str, str]]:
+    """One disposal per token per day, plus each disposal the same-day pool does not cover.
+
+    Slices of that one disposal are netted before the result goes in box 13.4 or 13.5.
+    Returns ``None`` when the rows do not name a matching rule.
+    """
+    if not disposals or not any(str(row.get("disposal_type") or "") for row in disposals):
+        return None
+    groups: Dict[Any, List[Decimal]] = {}
+    order: List[Any] = []
+    for index, row in enumerate(disposals):
+        kind = str(row.get("disposal_type") or "").casefold()
+        asset = str(row.get("asset") or "")
+        day = str(row.get("date_iso") or row.get("date") or "")
+        if any(word in kind for word in _SLICE_WORDS):
+            key: Any = ("day", asset, day)
+        else:
+            key = ("one", index)
+        if key not in groups:
+            order.append(key)
+            groups[key] = []
+        groups[key].append(_decimal(row.get("gain")))
+    gains = Decimal(0)
+    losses = Decimal(0)
+    for key in order:
+        net = sum(groups[key], Decimal(0))
+        if net >= 0:
+            gains += net
+        else:
+            losses += -net
+    return {
+        "count": str(len(order)),
+        "gains": f"{gains.quantize(Decimal('0.01'))}",
+        "losses": f"{losses.quantize(Decimal('0.01'))}",
+    }
+
+
+def box_13_6(codes: Sequence[str]) -> str:
+    """``NVC`` for one code, ``MUL`` when more than one code is recorded, otherwise blank."""
+    unique: List[str] = []
+    for code in codes:
+        text = str(code or "").strip()
+        if text and text not in unique:
+            unique.append(text)
+    if not unique:
+        return ""
+    if len(unique) > 1:
+        return "MUL"
+    return unique[0]
+
+
+def estimates_flag(rows: Sequence[Mapping[str, Any]]) -> str:
+    """``X`` when a value comes from a price source, including every token-to-token swap."""
+    for row in rows:
+        if _priced_from_a_source(row):
+            return "X"
+    return ""
+
+
+def _priced_from_a_source(row: Mapping[str, Any]) -> bool:
+    buy = str(row.get("buy_asset") or "").upper()
+    sell = str(row.get("sell_asset") or "").upper()
+    if buy and sell and buy != sell and "GBP" not in {buy, sell}:
+        return True
+    source = str(row.get("fx_source") or row.get("price_source") or "").strip()
+    if not source:
+        return False
+    folded = source.casefold()
+    if "actual" in folded or folded == "transaction gbp value":
+        return False
+    return True
+
+
+def _fill_disposal_boxes(
+    boxes: List[Dict[str, str]], disposals: Sequence[Mapping[str, Any]]
+) -> None:
+    figures = grouped_crypto_boxes(disposals)
+    if figures is None:
+        return
+    for box in boxes:
+        if box["box"] == "13.1":
+            box["value"] = figures["count"]
+        elif box["box"] == "13.4":
+            box["value"] = figures["gains"]
+        elif box["box"] == "13.5":
+            box["value"] = figures["losses"]
+
+
+def _fill_claim_code(boxes: List[Dict[str, str]], codes: Sequence[str]) -> None:
+    code = box_13_6(codes)
+    for box in boxes:
+        if box["box"] == "13.6":
+            box["value"] = code
+
+
+def _fill_estimates(boxes: List[Dict[str, str]], rows: Sequence[Mapping[str, Any]]) -> None:
+    flag = estimates_flag(rows) if rows else ""
+    for box in boxes:
+        if box["box"] == "53" and flag:
+            box["value"] = flag
 
 
 def _fill_loss_boxes(boxes: List[Dict[str, str]], losses: Mapping[str, str]) -> None:

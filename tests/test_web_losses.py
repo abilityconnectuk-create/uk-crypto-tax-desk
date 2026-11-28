@@ -31,12 +31,13 @@ def test_opening_losses_fill_boxes_45_and_47(tmp_path: Path) -> None:
     row = for_year(desk, 2026)
     assert row["brought_used"] == "0.00"
     assert row["carried"] == "4000.00"
-    assert row["banner"] == "AWAITING TAX REVIEW"
+    assert row["banner"] == "confirmed"
+    assert row["lost"] == "0.00"
     report: Dict[str, Any] = {"summary": {}, "disposals": []}
     view = sa108_view(report, 2026, row)
     assert view is not None
     boxes = {item["box"]: item for item in view["boxes"]}
     assert boxes["45"]["value"] == "0.00"
     assert boxes["47"]["value"] == "4000.00"
-    assert boxes["45"]["confirmed"] == "no"
+    assert boxes["45"]["confirmed"] == "yes"
     assert view["banner"] == "AWAITING TAX REVIEW"

@@ -9,6 +9,7 @@ import io
 import zipfile
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
+from .allocation_desk import claim_codes
 from .events import read_events
 from .losses import for_year
 from .pack import pack_context, pack_lines
@@ -43,7 +44,13 @@ audit.txt is a summary of the desk log. It does not contain secrets.
 def build_zip(desk: Any, tax_year: int) -> bytes:
     context = pack_context(desk, tax_year)
     losses = for_year(desk, tax_year)
-    sa108 = sa108_view(context["report"], tax_year, losses)
+    sa108 = sa108_view(
+        context["report"],
+        tax_year,
+        losses,
+        rows=context.get("transactions"),
+        claim_codes=claim_codes(desk.root),
+    )
     context["losses"] = losses
     lines = pack_lines(context)
     files: Dict[str, Any] = {

@@ -3,13 +3,9 @@
     <div class="page-head">
         <div>
             <h1>Losses</h1>
-            <p class="lede">
-                Brought-forward losses reduce gains down to the annual exempt amount.
-                This year's losses are used first. The boxes stay AWAITING TAX REVIEW.
-            </p>
+            <p class="lede">Brought-forward losses reduce gains down to the annual exempt amount. An unclaimed loss past its four-year deadline is dropped and shown as lost.</p>
         </div>
     </div>
-    <p class="banner">AWAITING TAX REVIEW</p>
     {% if error %}<p class="warn">{{ error }}</p>{% endif %}
     <section class="card pad">
         <h2>Opening losses</h2>
@@ -32,10 +28,10 @@
             <h2>{{ row.year }}</h2>
             <p>Gains {{ row.gains }}. Gross losses {{ row.gross_losses }}. Allowance {{ row.allowance }}.</p>
             <p>SA108 box 45, brought-forward losses used: {{ row.brought_used }}.</p>
-            <p>SA108 box 47, losses carried forward: {{ row.carried }}.</p>
+            <p>SA108 box 47, losses carried forward: {{ row.carried }}. Lost: {{ row.lost }}.</p>
             <p>Claim status {{ row.claim_status }}. Four-year deadline {{ row.deadline }}.</p>
             {% if row.warning == "past" %}
-                <p class="warn">The four-year claim deadline for this year has passed. An accountant should review whether a claim can still be made.</p>
+                <p class="warn">The four-year claim deadline for this year has passed. An unclaimed loss is not carried forward.</p>
             {% elif row.warning == "near" %}
                 <p class="warn">The four-year claim deadline is within 90 days.</p>
             {% endif %}

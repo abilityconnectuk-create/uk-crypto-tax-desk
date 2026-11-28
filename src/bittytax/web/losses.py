@@ -9,14 +9,14 @@ import os
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .dashboard import tax_year_containing
 from .errors import DeskError
 from .rules import parameter
 
 _PENCE = Decimal("0.01")
-_BANNER = "AWAITING TAX REVIEW"
+_BANNER = "confirmed"
 
 
 def allocate(
@@ -115,7 +115,9 @@ def schedule(desk: Any, today: Optional[date] = None) -> List[Dict[str, str]]:
         allowance = _decimal(raw_allowance) if raw_allowance else Decimal(0)
         result = allocate(figures["gains"], figures["losses"], brought, allowance)
         deadline = claim_deadline(year)
+        status = claims.get(str(year), "unclaimed")
         gross = result["gross_losses"]
+        carried, lost, brought_used = _after_deadline(result, status, deadline, when)
         warning = deadline_warning(deadline, when) if gross > 0 else ""
         shown_allowance = (
             f"{result['allowance'].quantize(_PENCE)}" if raw_allowance else "not in the rule file"
@@ -125,16 +127,17 @@ def schedule(desk: Any, today: Optional[date] = None) -> List[Dict[str, str]]:
                 "year": str(year),
                 "gains": f"{result['gains'].quantize(_PENCE)}",
                 "gross_losses": f"{gross.quantize(_PENCE)}",
-                "brought_used": f"{result['brought_used'].quantize(_PENCE)}",
-                "carried": f"{result['carried'].quantize(_PENCE)}",
+                "brought_used": f"{brought_used.quantize(_PENCE)}",
+                "carried": f"{carried.quantize(_PENCE)}",
+                "lost": f"{lost.quantize(_PENCE)}",
                 "allowance": shown_allowance,
-                "claim_status": claims.get(str(year), "unclaimed"),
+                "claim_status": status,
                 "deadline": deadline,
                 "warning": warning,
                 "banner": _BANNER,
             }
         )
-        brought = result["carried"]
+        brought = carried
     return rows
 
 
@@ -143,6 +146,25 @@ def for_year(desk: Any, year: int) -> Dict[str, str]:
         if row["year"] == str(year):
             return row
     return {}
+
+
+def _after_deadline(
+    result: Dict[str, Decimal], status: str, deadline: str, today: date
+) -> Tuple[Decimal, Decimal, Decimal]:
+    """Drop an unclaimed loss once its four-year deadline has passed.
+
+    A claimed loss, and a loss that is still in time, keeps the ordinary carry.
+    The three figures are carried forward, lost, and brought-forward losses used.
+    """
+    gross = result["gross_losses"]
+    past = status != "claimed" and gross > 0 and today > date.fromisoformat(deadline)
+    if not past:
+        return result["carried"], Decimal(0), result["brought_used"]
+    gain = result["gains"]
+    exempt = result["allowance"]
+    opening = result["brought"]
+    brought_used = min(opening, max(gain - exempt, Decimal(0)))
+    return opening - brought_used, gross, brought_used
 
 
 def _year_figures(desk: Any, year: int) -> Dict[str, Decimal]:

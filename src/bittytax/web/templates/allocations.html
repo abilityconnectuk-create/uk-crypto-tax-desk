@@ -3,13 +3,9 @@
     <div class="page-head">
         <div>
             <h1>Allocations</h1>
-            <p class="lede">
-                Pending lots are linked only when you name the payment and the claim.
-                A refund reverses the original payment. A negligible-value claim is accountant-only and posts no loss.
-            </p>
+            <p class="lede">Pending lots are linked only when you name the payment and the claim. A refund disposes of the right. A negligible-value claim posts the loss.</p>
         </div>
     </div>
-    <p class="banner">AWAITING TAX REVIEW</p>
     <h2>Pending lots</h2>
     <table>
         <thead>
@@ -57,18 +53,38 @@
     </section>
     <section class="card pad">
         <h2>Negligible-value claim</h2>
-        <p>This records an open question. It does not post a loss.</p>
+        <p>The claim is the whole section 104 pool. It posts a deemed disposal and reacquisition, the loss in box 13.5 and code NVC in box 13.6. You attest that the asset is negligible, or that a lost key will not be recovered.</p>
         <form method="post" action="/allocations" class="filters">
             <input type="hidden" name="csrf" value="{{ csrf }}">
             <input type="hidden" name="action" value="negligible">
             <label>
-                Payment
-                <input name="payment">
+                Asset
+                <input name="asset">
             </label>
-            <button type="submit">Mark accountant-only</button>
+            <label>
+                Value, nil allowed
+                <input name="value" value="0">
+            </label>
+            <label>
+                Pool cost
+                <input name="pool_cost">
+            </label>
+            <label>
+                Claim date
+                <input name="on_date" placeholder="YYYY-MM-DD">
+            </label>
+            <label>
+                Earlier deemed date
+                <input name="earlier_date" placeholder="YYYY-MM-DD">
+            </label>
+            <label>
+                <input type="checkbox" name="lost_key" value="yes">
+                Lost key with no prospect of recovery
+            </label>
+            <button type="submit">Post the claim</button>
         </form>
         {% for row in view.claims %}
-            <p>{{ row.payment }}: {{ row.open_question }}</p>
+            <p>{{ row.asset }}: loss {{ row.loss }}, code {{ row.claim_code }}, deemed {{ row.date }}.</p>
         {% endfor %}
     </section>
 {% endblock %}

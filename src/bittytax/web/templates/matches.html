@@ -39,7 +39,7 @@
     </section>
     <section class="card pad">
         <h2>Disposal matching</h2>
-        <p class="banner">AWAITING TAX REVIEW</p>
+        {% if not view.matching.confirmed %}<p class="banner">AWAITING TAX REVIEW</p>{% endif %}
         {% if view.match_error %}<p class="warn">{{ view.match_error }}</p>{% endif %}
         <p>{{ view.matching.note }}</p>
         <p>

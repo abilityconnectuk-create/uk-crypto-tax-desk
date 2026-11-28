@@ -122,6 +122,10 @@ class CapitalGainsReportTotal(TypedDict):  # pylint: disable=too-few-public-meth
 class CapitalGainsReportTotalSplitYear(TypedDict):  # pylint: disable=too-few-public-methods
     gain_before: Decimal
     gain_after: Decimal
+    gains_before: Decimal
+    losses_before: Decimal
+    gains_after: Decimal
+    losses_after: Decimal
 
 
 class CapitalGainsReportSummary(TypedDict):  # pylint: disable=too-few-public-methods
@@ -949,6 +953,10 @@ class CalculateCapitalGains:
             self.split_totals: CapitalGainsReportTotalSplitYear = {
                 "gain_before": Decimal(0),
                 "gain_after": Decimal(0),
+                "gains_before": Decimal(0),
+                "losses_before": Decimal(0),
+                "gains_after": Decimal(0),
+                "losses_after": Decimal(0),
             }
             self.cgt_estimate_split: CapitalGainsReportEstimate = {
                 "allowance": Decimal(self.CG_DATA_INDIVIDUAL[tax_year]["allowance"]),
@@ -999,8 +1007,16 @@ class CalculateCapitalGains:
         if self.split_date:
             if te.date < self.split_date:
                 self.split_totals["gain_before"] += te.gain
+                if te.gain >= 0:
+                    self.split_totals["gains_before"] += te.gain
+                else:
+                    self.split_totals["losses_before"] += -te.gain
             else:
                 self.split_totals["gain_after"] += te.gain
+                if te.gain >= 0:
+                    self.split_totals["gains_after"] += te.gain
+                else:
+                    self.split_totals["losses_after"] += -te.gain
 
         if te.asset not in self.assets:
             self.assets[te.asset] = []
@@ -1020,19 +1036,38 @@ class CalculateCapitalGains:
                 self.cgt_estimate, self.totals["gain"], self.cgt_estimate["allowance"]
             )
         else:
-            # Use the allowance for gains on or after the split date first
-            self._tax_estimate_cgt2(
-                self.cgt_estimate_split,
-                self.split_totals["gain_after"],
-                self.cgt_estimate_split["allowance"],
-            )
-            # Use any remaining allowance for gains before the split date
-            remaining_allowance = (
-                self.cgt_estimate_split["allowance"] - self.cgt_estimate_split["allowance_used"]
-            )
-            self._tax_estimate_cgt2(
-                self.cgt_estimate, self.split_totals["gain_before"], remaining_allowance
-            )
+            # Pool this year's losses first. Set them, then the annual exempt
+            # amount, against the higher rates (on or after the split) first.
+            self._estimate_against_higher_rate_first()
+
+    def _estimate_against_higher_rate_first(self) -> None:
+        """Losses and the allowance go against the 18 and 24 percent gains first."""
+        gains_after = self.split_totals["gains_after"]
+        gains_before = self.split_totals["gains_before"]
+        losses = self.split_totals["losses_before"] + self.split_totals["losses_after"]
+        used_after = min(losses, gains_after)
+        after_left = gains_after - used_after
+        losses_left = losses - used_after
+        before_left = gains_before - min(losses_left, gains_before)
+        allowance = self.cgt_estimate_split["allowance"]
+        allowance_after = min(allowance, after_left)
+        taxable_after = after_left - allowance_after
+        allowance_before = min(allowance - allowance_after, before_left)
+        taxable_before = before_left - allowance_before
+        self._write_estimate(self.cgt_estimate_split, taxable_after, allowance_after)
+        self._write_estimate(self.cgt_estimate, taxable_before, allowance_before)
+
+    def _write_estimate(
+        self, estimate: CapitalGainsReportEstimate, taxable: Decimal, allowance_used: Decimal
+    ) -> None:
+        estimate["allowance_used"] = allowance_used
+        estimate["taxable_gain"] = taxable
+        if taxable > 0:
+            estimate["cgt_basic"] = taxable * estimate["cgt_basic_rate"] / 100
+            estimate["cgt_higher"] = taxable * estimate["cgt_higher_rate"] / 100
+        else:
+            estimate["cgt_basic"] = Decimal(0)
+            estimate["cgt_higher"] = Decimal(0)
 
     def _tax_estimate_cgt2(
         self, cgt_estimate: CapitalGainsReportEstimate, gain: Decimal, allowance: Decimal

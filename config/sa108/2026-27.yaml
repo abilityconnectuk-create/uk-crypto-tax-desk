@@ -25,11 +25,11 @@ boxes:
     accountant_review: false
     confirmed: false
     note: >
-      A disposal count is the number of capital-gains disposals after
-      same-day matching, then the next 30 days, then the section 104 pool.
-      A transfer between the person's own wallets is not counted. The desk
-      count is shown beside the count from an imported Koinly file.
-      This wording is awaiting tax review.
+      Count one disposal per token per day, using the pooled same-day sell,
+      plus each disposal the same-day pool does not cover. Slices of that one
+      disposal are not counted again. A transfer between the person's own
+      wallets is not counted. The desk count is shown beside the Koinly count.
+      This stub is not a new determination.
   - box: "13.2"
     key: proceeds
     label: Disposal proceeds
@@ -48,19 +48,27 @@ boxes:
     engine_field: total_gain
     accountant_review: false
     confirmed: false
+    note: >
+      Net the slices of one disposal first, then put that result in box 13.4
+      or box 13.5. This stub is not a new determination.
   - box: "13.5"
     key: losses
     label: Losses in the year
     engine_field: losses
     accountant_review: false
     confirmed: false
+    note: >
+      A loss here is the net loss on one disposal after its slices are combined.
+      This stub is not a new determination.
   - box: "13.6"
     key: claim_code
     label: Claim or election code
     engine_field: ""
     accountant_review: true
     confirmed: false
-    note: The claim or election code is not calculated. An accountant completes box 13.6.
+    note: >
+      NVC when a negligible-value claim is recorded. MUL when more than one
+      code applies. Blank otherwise. This stub is not a new determination.
   - box: "13.7"
     key: real_time_result
     label: Real Time Transaction result
@@ -90,14 +98,27 @@ boxes:
     engine_field: ""
     accountant_review: true
     confirmed: false
-    note: Losses carried forward go in box 47. The calculator does not keep this balance.
+    note: >
+      Losses carried forward go in box 47. An unclaimed loss is dropped once
+      its four-year deadline has passed, and is shown as lost.
+      This stub is not a new determination.
   - box: "53"
     key: estimates_flag
     label: Estimates and valuations
     engine_field: ""
     accountant_review: true
     confirmed: false
-    note: Box 53 is the estimates and valuations flag. An accountant decides whether to set it.
+    note: >
+      Set X when any event is valued from a price source rather than actual
+      sterling consideration, including every token-to-token swap. The method
+      statement goes in box 54. This stub is not a new determination.
+  - box: "54"
+    key: method_statement
+    label: Method statement
+    engine_field: ""
+    accountant_review: true
+    confirmed: false
+    note: The method statement for the valuations in box 53. This stub is not a new determination.
 annual_exempt_amount:
   value: "3000"
   confirmed: false
