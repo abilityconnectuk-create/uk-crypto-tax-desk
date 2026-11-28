@@ -117,6 +117,7 @@ Other pages, all using the same data directory:
 - Prices fills a missing GBP value from the calculator's price sources into a local cache. The uploaded file is not edited.
 - Plan shows the remaining annual exempt amount and a what-if sale. The sale is not saved. It is not advice.
 - Sync imports Ethereum transactions or a Kraken ledger, read only. The key stays in the data directory.
+- Matches pairs a withdrawal with a deposit on two of your wallets when the asset, the amount (within a fee tolerance) and the time window agree. A high score is stored as a withdrawal and a deposit. The calculator already treats those as a transfer. A lower score waits for Accept, Reject or Unmatch. The window and the tolerance are on that page.
 
 ### Open it from your phone (Tailscale)
 

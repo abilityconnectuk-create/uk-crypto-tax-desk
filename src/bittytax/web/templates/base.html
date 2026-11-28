@@ -64,6 +64,11 @@
                         <span class="nav-label">Settings</span>
                     </a>
                     <p class="more-label">More</p>
+                    <a href="/matches"
+                       {% if section == "matches" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("list") }}
+                        <span class="nav-label">Matches</span>
+                    </a>
                     <a href="/review"
                        {% if section == "review" %}aria-current="page"{% endif %}>
                         {{ ui.icon("list") }}

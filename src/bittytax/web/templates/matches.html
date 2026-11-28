@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block body %}
+    <div class="page-head">
+        <div>
+            <h1>Transfer matches</h1>
+            <p class="lede">{{ view.note }} Accept keeps a suggestion, Reject drops it, and Unmatch undoes a pair.</p>
+        </div>
+        <form method="post" action="/matches/run">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button type="submit" class="btn primary">Run matching</button>
+        </form>
+    </div>
+    <section class="card pad">
+        <h2>Window and tolerance</h2>
+        <form method="post" action="/matches/settings" class="filters">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <label>
+                Hours
+                <input name="window_hours" value="{{ view.settings.window_hours }}">
+            </label>
+            <label>
+                Fee percent
+                <input name="fee_percent" value="{{ view.settings.fee_percent }}">
+            </label>
+            <label>
+                Fee amount
+                <input name="fee_abs" value="{{ view.settings.fee_abs }}">
+            </label>
+            <label>
+                Auto score
+                <input name="auto_score" value="{{ view.settings.auto_score }}">
+            </label>
+            <label>
+                Suggest score
+                <input name="suggest_score" value="{{ view.settings.suggest_score }}">
+            </label>
+            <button type="submit" class="ghost">Save</button>
+        </form>
+    </section>
+    <section class="card pad">
+        <h2>Suggested matches</h2>
+        {% for item in view.suggested %}
+            <article>
+                <p>
+                    <strong>{{ item.asset }}</strong>
+                    {{ item.amount }} from {{ item.out_wallet }} to {{ item.in_wallet }}.
+                    Score {{ item.score }}. {{ item.reason }}.
+                </p>
+                <form method="post" action="/matches/decide">
+                    <input type="hidden" name="csrf" value="{{ csrf }}">
+                    <input type="hidden" name="out_id" value="{{ item.out_id }}">
+                    <input type="hidden" name="in_id" value="{{ item.in_id }}">
+                    <button type="submit" name="action" value="accept">Accept</button>
+                    <button type="submit" name="action" value="reject">Reject</button>
+                </form>
+            </article>
+        {% else %}
+            <p>No suggested pairs.</p>
+        {% endfor %}
+    </section>
+    <section class="card pad">
+        <h2>Matched</h2>
+        {% for item in view.matched %}
+            <article>
+                <p>{{ item.asset }} score {{ item.score }}. {{ item.action }} by {{ item.who }}.</p>
+                <form method="post" action="/matches/decide">
+                    <input type="hidden" name="csrf" value="{{ csrf }}">
+                    <input type="hidden" name="out_id" value="{{ item.out_id }}">
+                    <input type="hidden" name="in_id" value="{{ item.in_id }}">
+                    <button type="submit" name="action" value="unmatch">Unmatch</button>
+                </form>
+            </article>
+        {% else %}
+            <p>No matched pairs.</p>
+        {% endfor %}
+    </section>
+{% endblock %}

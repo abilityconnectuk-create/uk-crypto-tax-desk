@@ -175,6 +175,9 @@ class Desk:
                 },
             )
             self._write_effective_unlocked()
+        from .matching import apply_auto_matches  # pylint: disable=import-outside-toplevel
+
+        apply_auto_matches(self, who)
         return entry
 
     def imports(self) -> List[Dict[str, Any]]:
@@ -218,9 +221,8 @@ class Desk:
                 catalog = defi_tags()
                 row["defi_tags"] = catalog
                 chosen = ""
-                for item in row["log"]:
-                    if item.get("tag"):
-                        chosen = str(item["tag"])
+                if row["log"]:
+                    chosen = str(row["log"][-1].get("tag") or "")
                 row["tag"] = chosen
                 row["tag_note"] = next(
                     (item["note"] for item in catalog if item["id"] == chosen), ""
@@ -229,7 +231,13 @@ class Desk:
         raise DeskError("That transaction is not in the ledger.")
 
     def reclassify(
-        self, row_id: str, new_type: str, why: str, actor: str, tag: str = ""
+        self,
+        row_id: str,
+        new_type: str,
+        why: str,
+        actor: str,
+        tag: str = "",
+        allow_same: bool = False,
     ) -> Dict[str, str]:
         cleaned = why.strip()
         if not cleaned:
@@ -245,10 +253,21 @@ class Desk:
         with self._lock:
             current = self.transaction(row_id)
             before = str(current["type"])
-            if before == new_type and not chosen:
+            same_tag = chosen == str(current.get("tag", ""))
+            if before == new_type and same_tag:
+                if allow_same:
+                    return {
+                        "row_id": row_id,
+                        "at": _stamp(),
+                        "who": actor or "local",
+                        "why": cleaned,
+                        "before_type": before,
+                        "after_type": new_type,
+                        "tag": chosen,
+                    }
                 raise DeskError("That row already has this type.")
-            if before == new_type and chosen == str(current.get("tag", "")):
-                raise DeskError("That row already has this tag.")
+            if before == new_type and not chosen and not allow_same:
+                raise DeskError("That row already has this type.")
             entry = {
                 "row_id": row_id,
                 "at": _stamp(),

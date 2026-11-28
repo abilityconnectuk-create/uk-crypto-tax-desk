@@ -39,6 +39,7 @@ from .glossary import GLOSSARY
 from .identity import LOOPBACK, actor_for, trusted_tailscale_user
 from .import_inspect import find_problem, load_problems
 from .koinly_check import compare_year, load_uploads, store_uploads
+from .matching import apply_auto_matches, decide, match_view, save_settings
 from .pack import pack_context, pack_lines, render_pdf
 from .planning import hypothetical, plan_view
 from .present import (
@@ -239,6 +240,10 @@ def _handler_for(  # pylint: disable=too-many-statements
                 ("POST", "/prices/fetch"): self._prices_fetch,
                 ("GET", "/plan"): lambda: self._plan("", None, {}),
                 ("POST", "/plan"): self._plan_post,
+                ("GET", "/matches"): self._matches,
+                ("POST", "/matches/run"): self._matches_run,
+                ("POST", "/matches/decide"): self._matches_decide,
+                ("POST", "/matches/settings"): self._matches_settings,
                 ("GET", "/sync"): self._sync,
                 ("POST", "/sync/ethereum"): self._sync_ethereum,
                 ("POST", "/sync/kraken"): self._sync_kraken,
@@ -599,6 +604,37 @@ def _handler_for(  # pylint: disable=too-many-statements
                 self._plan(str(exc), None, form)
                 return
             self._plan("", result, form)
+
+        def _matches(self) -> None:
+            self._page("matches.html", "Matches", section="matches", view=match_view(desk))
+
+        def _matches_run(self) -> None:
+            actor = self._actor()
+            apply_auto_matches(desk, actor)
+            self._redirect("/matches")
+
+        def _matches_decide(self) -> None:
+            form = self._req.form
+            decide(
+                desk,
+                form.get("out_id", ""),
+                form.get("in_id", ""),
+                form.get("action", ""),
+                self._actor(),
+            )
+            self._redirect("/matches")
+
+        def _matches_settings(self) -> None:
+            save_settings(desk.root, self._req.form)
+            self._redirect("/matches")
+
+        def _actor(self) -> str:
+            return actor_for(
+                self.headers,
+                self._req.client,
+                host=self._req.host_name,
+                session_user=self._req.session.user,
+            )
 
         def _sync(self) -> None:
             self._page("sync.html", "Sync", section="sync", secrets=secrets_present(desk))
