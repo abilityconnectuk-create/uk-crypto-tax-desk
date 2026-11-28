@@ -1,7 +1,263 @@
 {% extends "base.html" %}
 {% block body %}
-    <h1>Config</h1>
-    <p class="lede">Read only. Editing the wallet register or the calculator config is not part of this desk.</p>
+    <h1>Settings</h1>
+    <p class="lede">General, tax rules, transactions, and display. Personal details stay in the data directory on this computer. The calculator config and the wallet register below stay read only.</p>
+    {% if saved %}<p class="note">Saved.</p>{% endif %}
+    {% if desk_settings.stale %}
+        <p class="warn">Reports are stale. Use Recalculate on Tax rules before you rely on a figure.</p>
+    {% endif %}
+    <nav class="filters" aria-label="Settings sections">
+        <a href="#general">General</a>
+        <a href="#tax-rules">Tax rules</a>
+        <a href="#transactions-settings">Transactions</a>
+        <a href="#display">Display</a>
+        <a href="#settings-audit">Settings audit</a>
+    </nav>
+    <section id="general">
+        <h2>General</h2>
+        <form method="post" action="/settings/save" class="filters">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="settings_action" value="general">
+            <label>
+                Base currency
+                <select name="base_currency">
+                    {% for code in desk_settings.currencies %}
+                        <option value="{{ code }}"
+                                {% if desk_settings.values.base_currency == code %}selected{% endif %}>{{ code }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Koinly file currency
+                <select name="koinly_currency">
+                    {% for code in desk_settings.currencies %}
+                        <option value="{{ code }}"
+                                {% if desk_settings.values.koinly_currency == code %}selected{% endif %}>{{ code }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <p>The comparison view converts a USD Koinly file into GBP at each transaction date.</p>
+            <label>
+                Home country
+                <select name="home_country">
+                    <option value="UK" selected>UK</option>
+                </select>
+            </label>
+            <p>Tax year start {{ desk_settings.tax_year_start }}. Fixed for the UK.</p>
+            <label>
+                Time zone
+                <select name="timezone">
+                    {% for zone in desk_settings.timezones %}
+                        <option value="{{ zone }}"
+                                {% if desk_settings.values.timezone == zone %}selected{% endif %}>{{ zone }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Report language
+                <select name="report_language">
+                    <option value="en-GB" selected>en-GB</option>
+                </select>
+            </label>
+            <label>
+                Lock past transactions before
+                <input name="lock_before"
+                       value="{{ desk_settings.values.lock_before }}"
+                       placeholder="YYYY-MM-DD">
+            </label>
+            <p>Locked rows are read-only. An edit is refused.</p>
+            <label>
+                Dust threshold, GBP
+                <input name="dust" value="{{ lists.dust }}">
+            </label>
+            <label>
+                Name
+                <input name="name" value="{{ desk_settings.values.name }}">
+            </label>
+            <label>
+                UTR
+                <input name="utr" value="{{ desk_settings.values.utr }}" inputmode="numeric">
+            </label>
+            <p>The name and UTR are for report covers. They are stored in the data directory only.</p>
+            <button type="submit">Save general</button>
+        </form>
+        <h3>Reset data</h3>
+        <p>A backup is written first. Type RESET to confirm.</p>
+        <form method="post" action="/settings/save" class="filters">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="settings_action" value="reset">
+            <label>
+                Confirmation
+                <input name="confirm" autocomplete="off">
+            </label>
+            <button type="submit" class="ghost">Reset data</button>
+        </form>
+    </section>
+    <section id="tax-rules">
+        <h2>Tax rules</h2>
+        <form method="post" action="/settings/save">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="settings_action" value="recalculate">
+            <button type="submit">Recalculate</button>
+        </form>
+        <form method="post" action="/settings/save" class="stack">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="settings_action" value="tax">
+            <fieldset>
+                <legend>Income events</legend>
+                {% for name in ("airdrops", "forks", "mining", "rewards") %}
+                    <label>
+                        <input type="checkbox"
+                               name="income_{{ name }}"
+                               value="on"
+                               {% if desk_settings.values["income_" + name] == "on" %}checked{% endif %}>
+                        {{ name }}
+                    </label>
+                {% endfor %}
+            </fieldset>
+            <label>
+                <input type="checkbox"
+                       name="other_gains_as_capital"
+                       value="yes"
+                       {% if desk_settings.values.other_gains_as_capital %}checked{% endif %}>
+                Treat other gains as capital gains
+            </label>
+            <p>{{ desk_settings.other_note }}</p>
+            <label>
+                Cashback cost basis
+                <select name="cashback_cost">
+                    <option value="nil"
+                            {% if desk_settings.values.cashback_cost == "nil" %}selected{% endif %}>Nil</option>
+                    <option value="market"
+                            {% if desk_settings.values.cashback_cost == "market" %}selected{% endif %}>Market value</option>
+                </select>
+            </label>
+            <label>
+                Cost basis method
+                <select name="cost_basis_method">
+                    <option value="hmrc_share_pooling" selected>{{ desk_settings.cost_basis_label }}</option>
+                </select>
+            </label>
+            <p>Same-day, 30-day, and section 104. Other methods are not offered.</p>
+            <button type="submit">Save tax rules</button>
+        </form>
+        <h3>Each tax year</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Tax year</th>
+                    <th>Switch</th>
+                    <th>Value</th>
+                    <th>Config</th>
+                    <th>Applied</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in desk_settings.switches %}
+                    <tr>
+                        <td>{{ item.year }}</td>
+                        <td>{{ item.name }}</td>
+                        <td>{{ item.value }}</td>
+                        <td>{{ item.status }}</td>
+                        <td>{{ item.applied }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+    <section id="transactions-settings">
+        <h2>Transactions</h2>
+        <p>Rules, the spam list, custom GBP prices, and the pricing source order. A custom price overrides every source.</p>
+        <h3>Rules</h3>
+        {% if user_rules %}
+            <ul>
+                {% for rule in user_rules %}
+                    <li>{{ rule.field }} {{ rule.match }}</li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <p>
+                No rules yet. <a href="/rules">Open rules</a>
+            </p>
+        {% endif %}
+        <h3>Pricing source order</h3>
+        <form method="post" action="/settings/save" class="stack">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="settings_action" value="pricing">
+            <label>
+                Source order
+                <input name="source_order" value="{{ desk_settings.source_text }}">
+            </label>
+            <p>Catalogue: {{ desk_settings.sources | join(", ") }}. Sources you leave out are still tried afterwards.</p>
+            <label>
+                Trusted coins
+                <input name="trusted_coins" value="{{ desk_settings.trusted_text }}">
+            </label>
+            <p>An untrusted or low-liquidity token with no reliable price is a warning, not a guess.</p>
+            <button type="submit">Save pricing</button>
+        </form>
+    </section>
+    <section id="display">
+        <h2>Display</h2>
+        <form method="post" action="/settings/save" class="filters">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="settings_action" value="display">
+            <label>
+                Number format
+                <select name="number_format">
+                    {% for fmt in ("1,234.56", "1.234,56", "1 234.56") %}
+                        <option value="{{ fmt }}"
+                                {% if desk_settings.values.number_format == fmt %}selected{% endif %}>{{ fmt }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Time format
+                <select name="time_format">
+                    <option value="24-hour"
+                            {% if desk_settings.values.time_format == "24-hour" %}selected{% endif %}>24-hour</option>
+                    <option value="12-hour"
+                            {% if desk_settings.values.time_format == "12-hour" %}selected{% endif %}>12-hour</option>
+                </select>
+            </label>
+            <label>
+                <input type="checkbox"
+                       name="compact_small"
+                       value="yes"
+                       {% if desk_settings.values.compact_small %}checked{% endif %}>
+                Compact small amounts
+            </label>
+            <p>Preview {{ desk_settings.number_preview }} at {{ desk_settings.time_preview }}.</p>
+            <button type="submit">Save display</button>
+        </form>
+    </section>
+    <section id="settings-audit">
+        <h2>Settings audit</h2>
+        {% if desk_settings.audit %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Setting</th>
+                        <th>Old</th>
+                        <th>New</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in desk_settings.audit %}
+                        <tr>
+                            <td>{{ item.at }}</td>
+                            <td>{{ item.key }}</td>
+                            <td>{{ item.old }}</td>
+                            <td>{{ item.new }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p>No settings changes yet.</p>
+        {% endif %}
+    </section>
     <h2>Calculator</h2>
     <p>File: <code>{{ config.calculator_config }}</code></p>
     <p>Local currency {{ config.local_currency }}. Time zone {{ config.local_timezone }}.</p>

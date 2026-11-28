@@ -22,7 +22,6 @@ from .tx_store import (
     delete_spam_token,
     import_prices,
     latest_overrides,
-    save_dust,
 )
 from .tx_workspace import (
     add_transaction,
@@ -202,7 +201,9 @@ def save_settings(handler: Any, desk: Any, upload: Optional[Tuple[str, bytes]] =
     elif action == "price-delete":
         delete_price(desk.root, form.get("price_id", ""))
     elif action == "dust":
-        save_dust(desk.root, form.get("dust", ""))
+        from .desk_settings import save_dust_setting  # pylint: disable=import-outside-toplevel
+
+        save_dust_setting(desk.root, who, form.get("dust", ""))
     elif action == "prices":
         if upload is None:
             raise DeskError("Choose a price file.")

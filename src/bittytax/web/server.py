@@ -47,6 +47,7 @@ from .convert import allowed_types
 from .cost_basis import trace_rows
 from .dashboard import tax_year_containing
 from .defi_apply import pending_preview
+from .desk_settings import page_model
 from .engine_run import supported_years
 from .errors import DeskError
 from .events import append_event
@@ -72,11 +73,12 @@ from .present import (
     initials,
     year_title,
 )
-from .prices import fetch_missing, load_misses, missing_slots
+from .prices import load_misses, missing_slots, price_transactions
 from .queues import save_gap, save_transfer_note
 from .rule_versions import record
 from .rules import accountant_review_items, list_rule_years
 from .sa108 import sa108_view
+from .settings_http import save_desk
 from .sources import detect_upload, parser_catalogue
 from .sources_extra import (
     extra_status,
@@ -317,6 +319,8 @@ def _handler_for(  # pylint: disable=too-many-statements
                     *_uploaded_file(self.headers.get("Content-Type", ""), self._req.raw),
                 ),
                 ("POST", "/transactions/import-apply"): lambda: import_apply(self, desk),
+                ("GET", "/settings"): lambda: self._redirect("/config"),
+                ("POST", "/settings/save"): lambda: save_desk(self, desk),
                 ("POST", "/settings/lists"): lambda: save_tx_settings(
                     self, desk, _listed_file(self)
                 ),
@@ -866,7 +870,7 @@ def _handler_for(  # pylint: disable=too-many-statements
             )
 
         def _prices_fetch(self) -> None:
-            fetch_missing(desk)
+            price_transactions(desk)
             self._redirect("/prices")
 
         def _plan(
@@ -1133,6 +1137,8 @@ def _handler_for(  # pylint: disable=too-many-statements
                 rule_years=list_rule_years(),
                 lists=config_lists(desk),
                 tag_years=tag_years(),
+                desk_settings=page_model(desk.root),
+                user_rules=load_rules(desk.root),
             )
 
         def _about(self) -> None:

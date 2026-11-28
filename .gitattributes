@@ -1,2 +1,13 @@
-# Keep the tag files on LF. A Windows checkout must not insert a carriage return.
+# Keep text on LF. A Windows checkout must not insert a carriage return.
+* text=auto eol=lf
 config/tags/*.yaml text eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.pdf binary
+*.ico binary
+*.zip binary
+*.xlsx binary
+*.xls binary

@@ -45,6 +45,7 @@ from .tx_store import apply_bundle, bundle, koinly_facts, row_extra, update_meta
 PAGE_SIZE = 50
 _SPECIAL = {NEEDS_REVIEW, POSSIBLE_SPAM, IGNORED}
 _VALUE_INDEX = {"buy_value": 3, "sell_value": 6, "fee_value": 9}
+_ASSET_FOR_VALUE = {"buy_value": 2, "sell_value": 5, "fee_value": 8}
 
 
 class Desk:  # pylint: disable=too-many-public-methods
@@ -261,6 +262,7 @@ class Desk:  # pylint: disable=too-many-public-methods
             raise DeskError("Choose a DeFi tag from the rule file.")
         with self._lock:
             current = self.transaction(row_id)
+            _refuse_locked(self.root, str(current.get("timestamp") or ""))
             before = str(current["type"])
             same_tag = chosen == str(current.get("tag", ""))
             if before == new_type and same_tag:
@@ -307,6 +309,7 @@ class Desk:  # pylint: disable=too-many-public-methods
                 row = current.get(row_id)
                 if row is None:
                     raise DeskError("That transaction is not in the ledger.")
+                _refuse_locked(self.root, str(row.get("timestamp") or ""))
                 new_type = str(change.get("type") or "")
                 if new_type not in allowed:
                     raise DeskError("Choose a BittyTax transaction type.")
@@ -343,6 +346,9 @@ class Desk:  # pylint: disable=too-many-public-methods
         """Append rows typed in on the desk. The raw upload directory is not used."""
         if not groups:
             raise DeskError("Enter a transaction.")
+        for cells in groups:
+            if len(cells) > 11:
+                _refuse_locked(self.root, str(cells[11]))
         import_id = f"manual-{_new_id()}"
         with self._lock:
             ledger = _read_json(self.root / "ledger.json", {"rows": []})
@@ -455,6 +461,7 @@ class Desk:  # pylint: disable=too-many-public-methods
         with self._lock:
             self._write_effective_unlocked()
             source = self._tax_source_unlocked()
+            source = _confirmed_rules(self.root, source, tax_year)
             digest = hashlib.sha256(source.read_bytes()).hexdigest()
         cache = self.root / "report-cache" / f"{tax_year}-{digest}.json"
         if cache.is_file():
@@ -576,10 +583,7 @@ class Desk:  # pylint: disable=too-many-public-methods
             if change is not None:
                 cells[0] = change["after_type"]
                 tag = str(change.get("tag") or "")
-            for field, entry in fills.get(stored["id"], {}).items():
-                index = _VALUE_INDEX.get(field)
-                if index is not None:
-                    cells[index] = entry["value"]
+            fill_label = _apply_fills(cells, fills.get(stored["id"], {}), overlay["prices"])
             fact = dict(facts.get(stored["id"]) or {})
             fact["row_id"] = stored["id"]
             names = list(sources.get(stored["import_id"], {}).get("names") or [])
@@ -594,7 +598,9 @@ class Desk:  # pylint: disable=too-many-public-methods
             packed["import_date"] = str(origin.get("imported_at") or "")[:10]
             if not packed["description"]:
                 packed["description"] = packed["note"]
-            if not packed["value_source"] and any(
+            if fill_label and packed["value_source"] in ("", "market"):
+                packed["value_source"] = fill_label
+            elif not packed["value_source"] and any(
                 packed[key] for key in ("buy_value", "sell_value", "fee_value")
             ):
                 packed["value_source"] = "market"
@@ -806,6 +812,41 @@ def _latest_changes(log: Sequence[Mapping[str, str]]) -> Dict[str, Mapping[str, 
     for entry in log:
         latest[entry["row_id"]] = entry
     return latest
+
+
+def _apply_fills(
+    cells: List[str],
+    fills: Mapping[str, Mapping[str, str]],
+    custom: Mapping[Tuple[str, str], Decimal],
+) -> str:
+    """Apply a fetched price where a custom price has not already claimed the blank."""
+    label = ""
+    day = cells[11][:10] if len(cells) > 11 else ""
+    for field, entry in fills.items():
+        index = _VALUE_INDEX.get(field)
+        asset_index = _ASSET_FOR_VALUE.get(field)
+        if index is None or asset_index is None:
+            continue
+        asset = cells[asset_index] if asset_index < len(cells) else ""
+        if asset and (day, asset.casefold()) in custom:
+            continue
+        cells[index] = str(entry.get("value") or "")
+        if entry.get("label"):
+            label = str(entry["label"])
+    return label
+
+
+def _refuse_locked(root: Path, timestamp: str) -> None:
+    from .desk_settings import refuse_if_locked  # pylint: disable=import-outside-toplevel
+
+    refuse_if_locked(root, timestamp)
+
+
+def _confirmed_rules(root: Path, source: Path, year: int) -> Path:
+    from .desk_settings import apply_confirmed_rules  # pylint: disable=import-outside-toplevel
+
+    adjusted = apply_confirmed_rules(root, source, year)
+    return adjusted if adjusted is not None else source
 
 
 def _latest_fills(log: Sequence[Mapping[str, str]]) -> Dict[str, Dict[str, Mapping[str, str]]]:
