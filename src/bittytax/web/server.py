@@ -50,6 +50,7 @@ from .defi_apply import pending_preview
 from .engine_run import supported_years
 from .errors import DeskError
 from .events import append_event
+from .filing import items_csv, readiness, save_threshold
 from .futures import save_toggle
 from .glossary import GLOSSARY
 from .identity import LOOPBACK, actor_for, trusted_tailscale_user
@@ -311,6 +312,10 @@ def _handler_for(  # pylint: disable=too-many-statements
                 ("POST", "/prices/fetch"): self._prices_fetch,
                 ("GET", "/plan"): lambda: self._plan("", None, {}),
                 ("POST", "/plan"): self._plan_post,
+                ("GET", "/ready"): lambda: self._ready(query),
+                ("GET", "/ready/print"): lambda: self._ready_print(query),
+                ("GET", "/ready.csv"): lambda: self._ready_csv(query),
+                ("POST", "/ready/threshold"): self._ready_threshold,
                 ("GET", "/matches"): self._matches,
                 ("GET", "/cost"): self._cost,
                 ("GET", "/defi"): lambda: self._defi(query),
@@ -912,6 +917,40 @@ def _handler_for(  # pylint: disable=too-many-statements
                 return
             self._plan("", result, form)
 
+        def _ready(self, query: Mapping[str, List[str]]) -> None:
+            year = _year(_field(query, "tax_year"))
+            self._page(
+                "ready.html",
+                "Ready to file",
+                section="ready",
+                tax_year=year,
+                view=readiness(desk, year),
+                printable=False,
+            )
+
+        def _ready_print(self, query: Mapping[str, List[str]]) -> None:
+            year = _year(_field(query, "tax_year"))
+            self._page(
+                "ready.html",
+                "Ready to file",
+                section="ready",
+                tax_year=year,
+                view=readiness(desk, year),
+                printable=True,
+            )
+
+        def _ready_csv(self, query: Mapping[str, List[str]]) -> None:
+            year = _year(_field(query, "tax_year"))
+            body = items_csv(readiness(desk, year)).encode("utf-8")
+            self._send(200, body, "text/csv; charset=utf-8", f"ready-to-file-{year}.csv")
+
+        def _ready_threshold(self) -> None:
+            form = self._req.form
+            year = _year(form.get("tax_year", ""))
+            save_threshold(desk.root, form.get("threshold", ""))
+            record(desk.root, self._actor(), "Saved the ready-to-file threshold.", "override")
+            self._redirect(f"/ready?tax_year={year}")
+
         def _matches(self) -> None:
             query = parse_qs(urlparse(self.path).query)
             year = _year(_field(query, "tax_year"))
@@ -1222,6 +1261,8 @@ def _year_action(path: str) -> str:
         "/review",
         "/koinly",
         "/plan",
+        "/ready",
+        "/ready/print",
         "/income",
         "/futures",
         "/missing-cost",

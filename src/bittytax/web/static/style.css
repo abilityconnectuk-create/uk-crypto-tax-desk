@@ -920,9 +920,16 @@ body.is-flow .app { display: block; }
   }
 }
 
+body.is-print .app { display: block; }
+body.is-print .sidebar,
+body.is-print .topbar,
+body.is-print .backdrop { display: none !important; }
+body.is-print main { max-width: 42rem; margin: 0 auto; }
+
 @media print {
   .sidebar, .topbar, footer, form, .steps, .periods { display: none !important; }
   .app { display: block; }
   body { background: #fff; }
   main { max-width: none; }
+  body.is-print footer { display: block !important; }
 }

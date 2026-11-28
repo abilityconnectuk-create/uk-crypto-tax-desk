@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 from ..config import config
 from .dashboard import dashboard, tax_year_containing
 from .errors import DeskError
+from .filing import readiness
 from .prices import latest_unit_prices
 from .store import Desk
 from .year_end import year_end_card
@@ -211,6 +212,7 @@ def build_home(
         "health_total": health_total,
         "health": health,
         "year_end": year_end_card(desk, moment),
+        "filing": readiness(desk, int(board["tax_year"]), moment),
     }
 
 

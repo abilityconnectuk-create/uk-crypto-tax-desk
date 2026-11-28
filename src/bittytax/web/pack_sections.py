@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from .disposal_match import from_report
 from .errors import DeskError
+from .filing import readiness
 from .income_schedule import build_schedule
 from .koinly_check import load_uploads
 from .koinly_reconcile import load_tolerance, page_bits
@@ -44,7 +45,7 @@ def extra_files(desk: Any, tax_year: int, context: Mapping[str, Any]) -> Dict[st
     except DeskError:
         review = {"needs_review": [], "queue": []}
     return {
-        "cover.txt": _cover(sa108, report, losses),
+        "cover.txt": _cover(sa108, report, losses, tax_year, desk),
         "method-statement.txt": method_statement(tax_year),
         "disposal-schedule.csv": _csv(from_report(report)["rows"]),
         "pool-snapshots.csv": _pools(report.get("pools") or {}),
@@ -112,8 +113,15 @@ def _cover(
     sa108: Optional[Mapping[str, Any]],
     report: Mapping[str, Any],
     losses: Mapping[str, str],
+    tax_year: int,
+    desk: Any,
 ) -> str:
-    lines = ["SA108 cover", _BANNER, "Boxes 13.1 to 13.8, and the inputs for boxes 45, 47 and 51."]
+    lines = [
+        "SA108 cover",
+        _BANNER,
+        f"Ready to file: {readiness(desk, tax_year)['status']}.",
+        "Boxes 13.1 to 13.8, and the inputs for boxes 45, 47 and 51.",
+    ]
     summary = report.get("summary") or {}
     if sa108:
         for box in sa108.get("boxes") or []:

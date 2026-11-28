@@ -8,7 +8,7 @@
         <link rel="stylesheet" href="/static/style.css">
         <script src="/static/desk.js"></script>
     </head>
-    <body class="{% if section == 'login' %}is-gate{% elif section == 'import-add' %}is-flow{% endif %}">
+    <body class="{% if section == 'login' %}is-gate{% elif section == 'import-add' %}is-flow{% elif printable %}is-print{% endif %}">
         {% import "macros.html" as ui %}
         <a class="skip" href="#content">Skip to content</a>
         <div class="app">
@@ -52,6 +52,11 @@
                     <a href="/plan" {% if section == "plan" %}aria-current="page"{% endif %}>
                         {{ ui.icon("plan") }}
                         <span class="nav-label">Planning</span>
+                    </a>
+                    <a href="/ready"
+                       {% if section == "ready" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("check") }}
+                        <span class="nav-label">Ready to file</span>
                     </a>
                     <a href="/koinly"
                        {% if section == "koinly" %}aria-current="page"{% endif %}>
