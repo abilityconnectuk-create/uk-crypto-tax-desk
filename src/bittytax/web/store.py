@@ -32,6 +32,7 @@ from .health import analyse
 
 PAGE_SIZE = 50
 _SPECIAL = {NEEDS_REVIEW, POSSIBLE_SPAM, IGNORED}
+_VALUE_INDEX = {"buy_value": 3, "sell_value": 6, "fee_value": 9}
 
 
 class Desk:
@@ -120,6 +121,9 @@ class Desk:
 
     def imports(self) -> List[Dict[str, Any]]:
         return list(_read_json(self.root / "imports.json", {"imports": []})["imports"])
+
+    def all_rows(self) -> List[Dict[str, Any]]:
+        return self._effective_rows()
 
     def transactions(
         self, filters: Optional[Mapping[str, str]] = None, page: int = 1
@@ -276,8 +280,24 @@ class Desk:
                 rows.extend(block.get(key, []))
         return collected
 
+    def price_fills(self) -> List[Dict[str, str]]:
+        return _read_jsonl(self.root / "price-fills.jsonl")
+
+    def apply_price_fills(self, entries: Sequence[Mapping[str, str]]) -> None:
+        """Append GBP values. The uploaded file is not edited."""
+        if not entries:
+            return
+        with self._lock:
+            with (self.root / "price-fills.jsonl").open("a", encoding="utf-8") as handle:
+                for entry in entries:
+                    handle.write(json.dumps(dict(entry), ensure_ascii=True, sort_keys=True) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            self._write_effective_unlocked()
+
     def _effective_rows(self) -> List[Dict[str, Any]]:
         changes = _latest_changes(self.change_log())
+        fills = _latest_fills(self.price_fills())
         rows = []
         for stored in self._ledger_rows():
             cells = list(stored["cells"])
@@ -285,6 +305,10 @@ class Desk:
             changed = change is not None
             if change is not None:
                 cells[0] = change["after_type"]
+            for field, entry in fills.get(stored["id"], {}).items():
+                index = _VALUE_INDEX.get(field)
+                if index is not None:
+                    cells[index] = entry["value"]
             rows.append(_present(stored["id"], stored["import_id"], cells, changed))
         return rows
 
@@ -397,6 +421,23 @@ def _latest_changes(log: Sequence[Mapping[str, str]]) -> Dict[str, Mapping[str, 
     for entry in log:
         latest[entry["row_id"]] = entry
     return latest
+
+
+def _latest_fills(log: Sequence[Mapping[str, str]]) -> Dict[str, Dict[str, Mapping[str, str]]]:
+    latest: Dict[str, Dict[str, Mapping[str, str]]] = {}
+    for entry in log:
+        latest.setdefault(entry["row_id"], {})[entry["field"]] = entry
+    return latest
+
+
+def _read_jsonl(path: Path) -> List[Dict[str, str]]:
+    if not path.is_file():
+        return []
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            rows.append(json.loads(line))
+    return rows
 
 
 def _manifest_entry(

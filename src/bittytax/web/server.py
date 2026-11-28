@@ -35,6 +35,7 @@ from .errors import DeskError
 from .identity import LOOPBACK, actor_for, trusted_tailscale_user
 from .koinly_check import compare_year, load_uploads, store_uploads
 from .pack import pack_context, pack_lines, render_pdf
+from .prices import fetch_missing, load_misses, missing_slots
 from .rules import accountant_review_items
 from .sa108 import sa108_view
 from .store import Desk
@@ -220,6 +221,8 @@ def _handler_for(  # pylint: disable=too-many-statements
                 ("GET", "/report.csv"): lambda: self._report_csv(query),
                 ("GET", "/koinly"): lambda: self._koinly(query),
                 ("POST", "/koinly"): self._koinly_post,
+                ("GET", "/prices"): self._prices,
+                ("POST", "/prices/fetch"): self._prices_fetch,
                 ("GET", "/config"): self._config,
                 ("GET", "/about"): self._about,
             }
@@ -398,6 +401,20 @@ def _handler_for(  # pylint: disable=too-many-statements
                 raise DeskError("Choose a Koinly summary or a complete tax report.")
             store_uploads(desk.root, year, summary, complete)
             self._redirect(f"/koinly?tax_year={year}")
+
+        def _prices(self) -> None:
+            rows = desk.all_rows()
+            self._page(
+                "prices.html",
+                "Prices",
+                section="prices",
+                missing=missing_slots(rows),
+                missed=load_misses(desk),
+            )
+
+        def _prices_fetch(self) -> None:
+            fetch_missing(desk)
+            self._redirect("/prices")
 
         def _report_csv(self, query: Mapping[str, List[str]]) -> None:
             year = _year(_field(query, "tax_year"))
