@@ -38,7 +38,7 @@ from .koinly_check import compare_year, load_uploads, store_uploads
 from .pack import pack_context, pack_lines, render_pdf
 from .planning import hypothetical, plan_view
 from .prices import fetch_missing, load_misses, missing_slots
-from .rules import accountant_review_items
+from .rules import accountant_review_items, list_rule_years
 from .sa108 import sa108_view
 from .store import Desk
 from .sync import import_ethereum, import_kraken, secrets_present
@@ -479,7 +479,11 @@ def _handler_for(  # pylint: disable=too-many-statements
 
         def _config(self) -> None:
             self._page(
-                "config.html", "Config", section="config", config=config_snapshot(desk.wallets_path)
+                "config.html",
+                "Config",
+                section="config",
+                config=config_snapshot(desk.wallets_path),
+                rule_years=list_rule_years(),
             )
 
         def _about(self) -> None:

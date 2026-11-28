@@ -35,6 +35,79 @@
             </tbody>
         </table>
     {% endif %}
+    <h2>Tax rules</h2>
+    <p class="banner">AWAITING TAX REVIEW. These files are read only. An unconfirmed rule is not applied.</p>
+    {% for year in rule_years %}
+        <h3>{{ year.slug }}</h3>
+        {% if year.rules and year.rules.note %}<p>{{ year.rules.note }}</p>{% endif %}
+        {% if year.rules and year.rules.parameters %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Parameter</th>
+                        <th>Value</th>
+                        <th>Confirmed</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for name, item in year.rules.parameters.items() %}
+                        <tr>
+                            <td>{{ name }}</td>
+                            <td>{{ item.value }}</td>
+                            <td>{{ item.confirmed }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+        {% if year.sa108 and year.sa108.boxes %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>SA108 box</th>
+                        <th>Label</th>
+                        <th>Confirmed</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for box in year.sa108.boxes %}
+                        <tr>
+                            <td>{{ box.box }}</td>
+                            <td>{{ box.label }}</td>
+                            <td>{{ box.confirmed }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+        {% if year.rules and year.rules.defi %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>DeFi tag</th>
+                        <th>Effect</th>
+                        <th>Confirmed</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for tag in year.rules.defi.tags %}
+                        <tr>
+                            <td>{{ tag.label }}</td>
+                            <td>{{ tag.effect }}</td>
+                            <td>{{ tag.confirmed }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+        {% if year.rules and year.rules.sources %}
+            <ul>
+                {% for source in year.rules.sources %}
+                    <li><a href="{{ source.url }}">{{ source.title }}</a></li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+    {% endfor %}
     <h2>Wallet register</h2>
     {% if config.wallets_present %}
         <p>File: <code>{{ config.wallets_path }}</code></p>
