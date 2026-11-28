@@ -1,18 +1,87 @@
 {% extends "base.html" %}
 {% block body %}
-    <h1>Import</h1>
-    <p class="lede">The file is stored byte for byte. A derived ledger is written beside it. Reclassifying a row later does not change the upload.</p>
-    {% if imported %}
-        <p class="note">Imported {{ imported }}. The original file is unchanged.</p>
+    <div class="page-head">
+        <div>
+            <h1>Wallets</h1>
+            <p class="lede">
+                Each import keeps the original file. A derived ledger is written beside it. Reclassifying a row later does not change the upload.
+            </p>
+        </div>
+        <a class="btn primary" href="/import/add">+ Add</a>
+    </div>
+    {% if summary %}
+        <section class="card pad">
+            <ol class="progress" aria-label="Import progress">
+                <li class="done">Upload</li>
+                <li class="done">Detect</li>
+                <li class="done">Summary</li>
+            </ol>
+            <p class="note">Imported {{ summary.id }}. The original file is unchanged.</p>
+            <p>
+                Detected source
+                {% if summary.format %}
+                    <strong>{{ summary.format }}</strong>
+                {% else %}
+                    not named
+                {% endif %}
+            </p>
+            <div class="summary-nums">
+                <p>
+                    <strong>{{ summary.imported_rows }}</strong>rows imported
+                </p>
+                <p>
+                    <strong>{{ summary.skipped }}</strong>skipped
+                </p>
+                <p>
+                    <strong>{{ summary.warnings }}</strong>warnings
+                </p>
+            </div>
+        </section>
     {% endif %}
-    {% if error %}
-        <p class="warn">{{ error }}</p>
-    {% endif %}
-    <form method="post" action="/import" enctype="multipart/form-data">
-        <input type="hidden" name="csrf" value="{{ csrf }}">
-        <label for="file">Koinly CSV, or another supported export</label>
-        <input id="file" name="file" type="file" required>
-        <button type="submit">Import</button>
-    </form>
-    <p>Each import records the file hash, the row count and the date range. Importing the same bytes again is refused.</p>
+    {% if error %}<p class="warn">{{ error }}</p>{% endif %}
+    <div class="card">
+        <table class="cards">
+            <thead>
+                <tr>
+                    <th>Source</th>
+                    <th>Transactions</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in wallets %}
+                    <tr>
+                        <td data-label="Source">
+                            <span class="source">
+                                <span class="letter av-{{ item.slot }}">{{ (item.format or item.filename)[:1] }}</span>
+                                <span class="two">
+                                    <strong>{{ item.filename }}</strong>
+                                    {% if item.sha256 %}
+                                        <code class="chip">{{ item.sha256[:12] }}</code>
+                                    {% endif %}
+                                </span>
+                            </span>
+                        </td>
+                        <td data-label="Transactions">
+                            <span class="two">
+                                <strong>{{ item.converted_rows }}</strong>
+                                <small>last imported {{ item.ago }}</small>
+                            </span>
+                        </td>
+                        <td data-label="Status">
+                            {% if item.unmapped_rows %}
+                                <span class="status amber">Warning</span>
+                            {% else %}
+                                <span class="status ok">Ready</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% else %}
+                    <tr>
+                        <td colspan="3">No files imported yet. Add a CSV or spreadsheet the conversion tool already recognises.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 {% endblock %}

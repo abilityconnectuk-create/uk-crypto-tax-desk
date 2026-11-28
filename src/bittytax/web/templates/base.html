@@ -3,54 +3,138 @@
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>{{ title }} · BittyTax desk</title>
+        <title>{{ title }} · UK Crypto Tax Desk</title>
         <meta name="csrf-token" content="{{ csrf }}">
         <link rel="stylesheet" href="/static/style.css">
+        <script src="/static/desk.js"></script>
     </head>
-    <body>
-        <header class="top">
-            <p class="brand"><a href="/">BittyTax desk</a></p>
-            <nav>
-                <a href="/" {% if section == "home" %}aria-current="page"{% endif %}>Desk</a>
-                <a href="/import"
-                   {% if section == "import" %}aria-current="page"{% endif %}>Import</a>
-                <a href="/transactions"
-                   {% if section == "transactions" %}aria-current="page"{% endif %}>Transactions</a>
-                <a href="/review"
-                   {% if section == "review" %}aria-current="page"{% endif %}>Review</a>
-                <a href="/health"
-                   {% if section == "health" %}aria-current="page"{% endif %}>Health
-                    {% if health_count %}
-                        <span class="badge">{{ health_count }}</span>
-                    {% endif %}
+    <body class="{% if section == 'login' %}is-gate{% elif section == 'import-add' %}is-flow{% endif %}">
+        {% import "macros.html" as ui %}
+        <a class="skip" href="#content">Skip to content</a>
+        <div class="app">
+            <aside id="sidebar" class="sidebar" aria-label="Primary">
+                <a class="brand" href="/">
+                    <span class="mark" aria-hidden="true">
+                        <svg viewBox="0 0 32 32">
+                            <rect width="32" height="32" rx="8" fill="#1F6FEB"></rect>
+                            <path d="M7 22l6-7 4 3 8-10" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            </path>
+                        </svg>
+                    </span>
+                    <span class="brand-name">UK Crypto Tax Desk</span>
                 </a>
-                <a href="/report"
-                   {% if section == "report" %}aria-current="page"{% endif %}>Report</a>
-                <a href="/koinly"
-                   {% if section == "koinly" %}aria-current="page"{% endif %}>Koinly</a>
-                <a href="/prices"
-                   {% if section == "prices" %}aria-current="page"{% endif %}>Prices</a>
-                <a href="/plan" {% if section == "plan" %}aria-current="page"{% endif %}>Plan</a>
-                <a href="/sync" {% if section == "sync" %}aria-current="page"{% endif %}>Sync</a>
-                <a href="/config"
-                   {% if section == "config" %}aria-current="page"{% endif %}>Config</a>
-                <a href="/about"
-                   {% if section == "about" %}aria-current="page"{% endif %}>About</a>
-            </nav>
-            {% if signed_in %}
-                <p class="who">{{ actor }}</p>
-                <form class="signout" method="post" action="/logout">
-                    <input type="hidden" name="csrf" value="{{ csrf }}">
-                    <button type="submit">Sign out</button>
-                </form>
-            {% endif %}
-        </header>
-        <main>
-            {% block body %}{% endblock %}
-        </main>
-        <footer>
-            <p>BittyTax is copyright Nano Nano Ltd and licensed under the GNU Affero General Public License, version 3 (AGPL-3.0). This desk is a local fork of that program. The licence is unchanged.</p>
-            <p>Nano Nano Ltd does not provide tax, legal, accounting or financial advice. Figures here are the calculator's output for information only. They are not tax advice. Obtain advice from a professional accountant before you file.</p>
-        </footer>
+                <nav>
+                    <a href="/" {% if section == "home" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("home") }}
+                        <span class="nav-label">Home</span>
+                    </a>
+                    <a href="/report"
+                       {% if section == "report" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("report") }}
+                        <span class="nav-label">Tax reports</span>
+                    </a>
+                    <a href="/import"
+                       {% if section == "import" or section == "import-add" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("wallet") }}
+                        <span class="nav-label">Wallets</span>
+                    </a>
+                    <a href="/transactions"
+                       {% if section == "transactions" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("list") }}
+                        <span class="nav-label">Transactions</span>
+                    </a>
+                    <a href="/health"
+                       {% if section == "health" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("health") }}
+                        <span class="nav-label">Data health</span>
+                        {% if health_count %}<span class="badge">{{ health_count }}</span>{% endif %}
+                    </a>
+                    <a href="/plan" {% if section == "plan" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("plan") }}
+                        <span class="nav-label">Planning</span>
+                    </a>
+                    <a href="/koinly"
+                       {% if section == "koinly" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("check") }}
+                        <span class="nav-label">Koinly check</span>
+                    </a>
+                    <a href="/config"
+                       {% if section == "config" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("settings") }}
+                        <span class="nav-label">Settings</span>
+                    </a>
+                    <p class="more-label">More</p>
+                    <a href="/review"
+                       {% if section == "review" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("list") }}
+                        <span class="nav-label">Review</span>
+                    </a>
+                    <a href="/prices"
+                       {% if section == "prices" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("report") }}
+                        <span class="nav-label">Prices</span>
+                    </a>
+                    <a href="/sync" {% if section == "sync" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("wallet") }}
+                        <span class="nav-label">Sync</span>
+                    </a>
+                    <a href="/about"
+                       {% if section == "about" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("check") }}
+                        <span class="nav-label">About</span>
+                    </a>
+                </nav>
+                <button type="button"
+                        class="icon-btn collapse-btn"
+                        aria-pressed="false"
+                        aria-label="Collapse sidebar">{{ ui.icon("menu") }}</button>
+            </aside>
+            <div class="workspace">
+                <header class="topbar">
+                    <button type="button"
+                            class="icon-btn menu-btn"
+                            aria-label="Open menu"
+                            aria-expanded="false"
+                            aria-controls="sidebar">{{ ui.icon("menu") }}</button>
+                    <form class="year-switch" method="get" action="{{ year_action }}">
+                        {% for item in year_keep %}
+                            <input type="hidden" name="{{ item.key }}" value="{{ item.value }}">
+                        {% endfor %}
+                        <label class="sr" for="top-year">Tax year</label>
+                        <select id="top-year" name="tax_year">
+                            {% for item in years %}
+                                <option value="{{ item.year }}"
+                                        {% if item.year == tax_year %}selected{% endif %}>{{ item.label }}</option>
+                            {% endfor %}
+                        </select>
+                        <button type="submit" class="ghost">Show</button>
+                    </form>
+                    <span class="spacer"></span>
+                    <button type="button"
+                            class="icon-btn theme-btn"
+                            aria-label="Dark mode"
+                            aria-pressed="false">{{ ui.icon("moon") }}</button>
+                    <span class="user-chip" title="{{ actor or 'This computer' }}">{{ initials }}</span>
+                    {% if signed_in %}
+                        <form class="signout" method="post" action="/logout">
+                            <input type="hidden" name="csrf" value="{{ csrf }}">
+                            <button type="submit" class="ghost">Sign out</button>
+                        </form>
+                    {% endif %}
+                </header>
+                <button type="button" class="backdrop" aria-label="Close menu"></button>
+                <main id="content">
+                    {% block body %}{% endblock %}
+                </main>
+                <footer>
+                    <p>
+                        BittyTax is copyright Nano Nano Ltd and licensed under the GNU Affero General Public License, version 3 (AGPL-3.0). This desk is a local fork of that program. The licence is unchanged.
+                    </p>
+                    <p>
+                        Nano Nano Ltd does not provide tax, legal, accounting or financial advice. Figures here are the calculator's output for information only. They are not tax advice. Obtain advice from a professional accountant before you file.
+                    </p>
+                </footer>
+            </div>
+        </div>
     </body>
 </html>

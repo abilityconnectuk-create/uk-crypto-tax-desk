@@ -1,97 +1,199 @@
 {% extends "base.html" %}
+{% import "macros.html" as ui with context %}
 {% block body %}
-    <h1>Transactions</h1>
+    <div class="page-head">
+        <div>
+            <h1>Transactions</h1>
+            <p class="lede">Search, filter, and open a row to reclassify it. The uploaded file is not edited.</p>
+        </div>
+    </div>
     <form class="filters" method="get" action="/transactions">
-        <label>
-            Search
-            <input name="query" value="{{ filters.query }}">
-        </label>
-        <label>
-            From
-            <input name="date_from"
-                   value="{{ filters.date_from }}"
-                   placeholder="YYYY-MM-DD">
-        </label>
-        <label>
-            To
-            <input name="date_to" value="{{ filters.date_to }}" placeholder="YYYY-MM-DD">
-        </label>
-        <label>
-            Asset
-            <select name="asset">
-                <option value="">Any</option>
-                {% for asset in listing.assets %}
-                    <option value="{{ asset }}"
-                            {% if filters.asset == asset %}selected{% endif %}>{{ asset }}</option>
-                {% endfor %}
-            </select>
-        </label>
-        <label>
-            Wallet
-            <select name="wallet">
-                <option value="">Any</option>
-                {% for wallet in listing.wallets %}
-                    <option value="{{ wallet }}"
-                            {% if filters.wallet == wallet %}selected{% endif %}>{{ wallet }}</option>
-                {% endfor %}
-            </select>
-        </label>
-        <label>
-            Type
-            <select name="kind">
-                <option value="">Any</option>
-                {% for kind in listing.types %}
-                    <option value="{{ kind }}" {% if filters.kind == kind %}selected{% endif %}>{{ kind }}</option>
-                {% endfor %}
-            </select>
-        </label>
-        <label>
-            Review
-            <select name="status">
-                <option value="">Any</option>
-                {% for status in ["clear", "reclassified", "needs-review", "spam", "unmapped"] %}
-                    <option value="{{ status }}"
-                            {% if filters.status == status %}selected{% endif %}>{{ status }}</option>
-                {% endfor %}
-            </select>
-        </label>
-        <button type="submit">Filter</button>
+        <label class="sr" for="tx-search">Search transactions</label>
+        <input id="tx-search"
+               class="search js-live"
+               type="search"
+               name="query"
+               value="{{ filters.query }}"
+               placeholder="Search">
+        <details class="pill-menu">
+            <summary>Wallet</summary>
+            <div class="menu">
+                <label>
+                    Wallet
+                    <select name="wallet" class="js-auto">
+                        <option value="">Any</option>
+                        {% for wallet in listing.wallets %}
+                            <option value="{{ wallet }}"
+                                    {% if filters.wallet == wallet %}selected{% endif %}>{{ wallet }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+            </div>
+        </details>
+        <details class="pill-menu">
+            <summary>Asset</summary>
+            <div class="menu">
+                <label>
+                    Asset
+                    <select name="asset" class="js-auto">
+                        <option value="">Any</option>
+                        {% for asset in listing.assets %}
+                            <option value="{{ asset }}"
+                                    {% if filters.asset == asset %}selected{% endif %}>{{ asset }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+            </div>
+        </details>
+        <details class="pill-menu">
+            <summary>Type</summary>
+            <div class="menu">
+                <label>
+                    Type
+                    <select name="kind" class="js-auto">
+                        <option value="">Any</option>
+                        {% for kind in listing.types %}
+                            <option value="{{ kind }}"
+                                    {% if filters.kind == kind %}selected{% endif %}>{{ kind }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+            </div>
+        </details>
+        <details class="pill-menu">
+            <summary>Tag</summary>
+            <div class="menu">
+                <label>
+                    Tag
+                    <select name="tag" class="js-auto">
+                        <option value="">Any</option>
+                        {% for tag in listing.tags %}
+                            <option value="{{ tag }}" {% if filters.tag == tag %}selected{% endif %}>{{ tag }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+            </div>
+        </details>
+        <details class="pill-menu">
+            <summary>Warnings</summary>
+            <div class="menu">
+                <label>
+                    Warnings
+                    <select name="status" class="js-auto">
+                        <option value="">Any</option>
+                        {% for status in ["warnings", "needs-review", "spam", "unmapped", "reclassified", "clear"] %}
+                            <option value="{{ status }}"
+                                    {% if filters.status == status %}selected{% endif %}>{{ status }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+            </div>
+        </details>
+        <details class="pill-menu">
+            <summary>Date</summary>
+            <div class="menu">
+                <label>
+                    From
+                    <input name="date_from"
+                           value="{{ filters.date_from }}"
+                           placeholder="YYYY-MM-DD">
+                </label>
+                <label>
+                    To
+                    <input name="date_to" value="{{ filters.date_to }}" placeholder="YYYY-MM-DD">
+                </label>
+            </div>
+        </details>
+        <details class="pill-menu">
+            <summary>+ Add filter</summary>
+            <div class="menu">
+                <label>
+                    Also contains
+                    <input name="extra" value="{{ filters.extra }}">
+                </label>
+            </div>
+        </details>
+        <label class="sr" for="tx-sort">Sort</label>
+        <select id="tx-sort" name="sort" class="js-auto">
+            <option value="date" {% if sort == "date" %}selected{% endif %}>Date</option>
+            <option value="date_asc" {% if sort == "date_asc" %}selected{% endif %}>Date, oldest</option>
+            <option value="value" {% if sort == "value" %}selected{% endif %}>Value</option>
+            <option value="type" {% if sort == "type" %}selected{% endif %}>Type</option>
+            <option value="asset" {% if sort == "asset" %}selected{% endif %}>Asset</option>
+        </select>
+        <input type="hidden" name="per" value="{{ per }}">
+        <button type="submit" class="ghost">Apply</button>
     </form>
-    <p>{{ listing.total }} matching. Page {{ listing.page }} of {{ listing.pages }}.</p>
-    <table>
-        <thead>
-            <tr>
-                <th>Date</th>
-                <th>Type</th>
-                <th>In</th>
-                <th>Out</th>
-                <th>Wallet</th>
-                <th>Status</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for row in listing.rows %}
-                <tr>
-                    <td><a href="/transactions/{{ row.import_id }}/{{ row.id.split(':')[1] }}">{{ row.date }}</a></td>
-                    <td>{{ row.type }}</td>
-                    <td>{% if row.buy_quantity %}{{ row.buy_quantity }} {{ row.buy_asset }}{% endif %}</td>
-                    <td>{% if row.sell_quantity %}{{ row.sell_quantity }} {{ row.sell_asset }}{% endif %}</td>
-                    <td>{{ row.wallet }}</td>
-                    <td>{{ row.status }}</td>
-                </tr>
-            {% else %}
-                <tr>
-                    <td colspan="6">No transactions match.</td>
-                </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    <p class="pager">
-        {% if listing.page > 1 %}
-            <a href="/transactions?{% if qs %}{{ qs }}&{% endif %}page={{ listing.page - 1 }}">Previous</a>
-        {% endif %}
-        {% if listing.page < listing.pages %}
-            <a href="/transactions?{% if qs %}{{ qs }}&{% endif %}page={{ listing.page + 1 }}">Next</a>
-        {% endif %}
-    </p>
+    <div class="card tx-list">
+        {% for row in listing.rows %}
+            {% set asset = row.buy_asset or row.sell_asset %}
+            {% set qty = row.buy_quantity or row.sell_quantity %}
+            {% set value = row.buy_value or row.sell_value %}
+            <a class="tx-row"
+               href="/transactions/{{ row.import_id }}/{{ row.id.split(':')[1] }}">
+                <span class="tx-main">
+                    <span class="kind" aria-hidden="true">{{ row.type[:1] }}</span>
+                    <span class="two">
+                        <strong>{{ row.type }}</strong>
+                        <small>{{ row.date }}</small>
+                    </span>
+                </span>
+                <span class="tx-asset">
+                    <span class="letter av-{{ asset|slot }}">{{ (asset or "?")[:1] }}</span>
+                    <span class="two">
+                        <strong>{{ qty }} {{ asset }}</strong>
+                        <small>{{ value|gbp }}</small>
+                    </span>
+                </span>
+                <span class="tx-side">
+                    {% if row.note %}<span class="tag">{{ row.note }}</span>{% endif %}
+                    {% if row.status != "clear" %}<span class="tag warn">{{ row.status }}</span>{% endif %}
+                    {% if row.status in ["needs-review", "spam", "unmapped"] %}
+                        <span class="warn-icon" aria-label="Warning">!</span>
+                    {% endif %}
+                    <code class="chip">{{ row.id.split(":")[1] }}</code>
+                </span>
+            </a>
+        {% else %}
+            <p class="pad">No transactions match.</p>
+        {% endfor %}
+        <div class="pager">
+            <p>{{ listing.total }} transactions</p>
+            <form method="get" action="/transactions">
+                {% for key in ["query", "date_from", "date_to", "asset", "wallet", "kind", "status", "tag", "extra"] %}
+                    <input type="hidden" name="{{ key }}" value="{{ filters[key] }}">
+                {% endfor %}
+                <input type="hidden" name="sort" value="{{ sort }}">
+                <label>
+                    Per page
+                    <select name="per" class="js-auto" aria-label="Rows per page">
+                        {% for size in [25, 50, 100] %}
+                            <option value="{{ size }}" {% if per == size %}selected{% endif %}>{{ size }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <button type="submit" class="ghost">Show</button>
+            </form>
+            <p class="pager">
+                {% if listing.page > 1 %}
+                    <a href="/transactions?{{ qs }}&amp;page={{ listing.page - 1 }}">Previous</a>
+                {% endif %}
+                <span>Page {{ listing.page }} of {{ listing.pages }}</span>
+                {% if listing.page < listing.pages %}
+                    <a href="/transactions?{{ qs }}&amp;page={{ listing.page + 1 }}">Next</a>
+                {% endif %}
+            </p>
+        </div>
+    </div>
+    {% if panel %}
+        <aside class="slide-aside" aria-label="Transaction detail">
+            {{ ui.tx_panel(panel, panel_error, saved, "/transactions?" + qs) }}
+        </aside>
+    {% endif %}
+    <dialog id="tx-dialog"
+            class="slide"
+            aria-modal="true"
+            aria-labelledby="tx-dialog-title">
+        <div id="tx-dialog-body"></div>
+    </dialog>
 {% endblock %}

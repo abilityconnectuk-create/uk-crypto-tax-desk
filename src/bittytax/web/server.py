@@ -4,8 +4,10 @@
 
 from __future__ import annotations
 
+import json
 import mimetypes
 import re
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from email import policy
 from email.parser import BytesParser
@@ -30,16 +32,27 @@ from .auth import (
     safe_next,
 )
 from .config_view import config_snapshot
-from .dashboard import dashboard
+from .dashboard import tax_year_containing
 from .engine_run import supported_years
 from .errors import DeskError
+from .glossary import GLOSSARY
 from .identity import LOOPBACK, actor_for, trusted_tailscale_user
 from .koinly_check import compare_year, load_uploads, store_uploads
 from .pack import pack_context, pack_lines, render_pdf
 from .planning import hypothetical, plan_view
+from .present import (
+    ago,
+    avatar_slot,
+    build_home,
+    guided_steps,
+    import_summary,
+    initials,
+    year_title,
+)
 from .prices import fetch_missing, load_misses, missing_slots
 from .rules import accountant_review_items, list_rule_years
 from .sa108 import sa108_view
+from .sources import detect_upload, parser_catalogue
 from .store import Desk
 from .sync import import_ethereum, import_kraken, secrets_present
 
@@ -63,6 +76,9 @@ def _gbp(value: object) -> str:
 
 
 _ENV.filters["gbp"] = _gbp
+_ENV.filters["ago"] = ago
+_ENV.filters["slot"] = avatar_slot
+_ENV.globals["glossary"] = GLOSSARY
 _MAX_BODY = 64 * 1024 * 1024
 
 
@@ -214,6 +230,8 @@ def _handler_for(  # pylint: disable=too-many-statements
             routes = {
                 ("GET", "/"): self._home,
                 ("GET", "/import"): self._import_form,
+                ("GET", "/import/add"): self._import_add,
+                ("POST", "/import/detect"): self._import_detect,
                 ("POST", "/import"): self._import_post,
                 ("GET", "/transactions"): lambda: self._transactions(query),
                 ("GET", "/review"): lambda: self._review(query),
@@ -241,17 +259,57 @@ def _handler_for(  # pylint: disable=too-many-statements
             handler()
 
         def _home(self) -> None:
+            query = parse_qs(urlparse(self.path).query)
+            raw_year = _field(query, "tax_year")
+            view = build_home(
+                desk,
+                _year(raw_year) if raw_year else 0,
+                _field(query, "range") or "all",
+                _field(query, "hq"),
+                _field(query, "hsort") or "value",
+                _field(query, "hdir") or "desc",
+            )
             self._page(
                 "home.html",
-                "Desk",
+                "Home",
                 section="home",
-                counts=desk.counts(),
-                imports=desk.imports(),
-                board=dashboard(desk),
+                view=view,
+                tax_year=view["tax_year"],
             )
 
         def _import_form(self) -> None:
-            self._page("import.html", "Import", section="import", error="")
+            chosen = _field(parse_qs(urlparse(self.path).query), "imported")
+            summary = None
+            wallets = []
+            for item in desk.imports():
+                packed = dict(item)
+                packed["ago"] = ago(str(item.get("imported_at") or ""))
+                packed["slot"] = avatar_slot(str(item.get("format") or item.get("filename") or "?"))
+                wallets.append(packed)
+                if item["id"] == chosen:
+                    summary = import_summary(item)
+            self._page(
+                "import.html",
+                "Wallets",
+                section="import",
+                summary=summary,
+                wallets=wallets,
+                error="",
+            )
+
+        def _import_add(self) -> None:
+            self._page(
+                "import_add.html",
+                "Add your data",
+                section="import-add",
+                parsers=parser_catalogue(),
+                error="",
+            )
+
+        def _import_detect(self) -> None:
+            filename, payload = _uploaded_file(self.headers.get("Content-Type", ""), self._req.raw)
+            found = detect_upload(filename, payload)
+            self._send(200, json.dumps(found).encode("utf-8"), "application/json")
 
         def _import_post(self) -> None:
             filename, payload = _uploaded_file(self.headers.get("Content-Type", ""), self._req.raw)
@@ -261,11 +319,33 @@ def _handler_for(  # pylint: disable=too-many-statements
         def _transactions(self, query: Mapping[str, List[str]]) -> None:
             filters = {
                 key: _field(query, key)
-                for key in ("query", "date_from", "date_to", "asset", "wallet", "kind", "status")
+                for key in (
+                    "query",
+                    "date_from",
+                    "date_to",
+                    "asset",
+                    "wallet",
+                    "kind",
+                    "status",
+                    "tag",
+                    "extra",
+                )
             }
             page = _page_number(_field(query, "page"))
-            listing = desk.transactions(filters, page)
+            per_page = _per_page(_field(query, "per"))
+            sort = _field(query, "sort") or "date"
+            listing = desk.transactions(filters, page, per_page=per_page, sort=sort)
             kept = {key: value for key, value in filters.items() if value}
+            kept["sort"] = sort
+            kept["per"] = str(listing["per_page"])
+            panel = None
+            panel_error = ""
+            open_id = _field(query, "open")
+            if open_id:
+                try:
+                    panel = desk.transaction(open_id)
+                except DeskError as exc:
+                    panel_error = str(exc)
             self._page(
                 "transactions.html",
                 "Transactions",
@@ -273,6 +353,11 @@ def _handler_for(  # pylint: disable=too-many-statements
                 listing=listing,
                 filters=filters,
                 qs=urlencode(kept),
+                sort=sort,
+                per=listing["per_page"],
+                panel=panel,
+                panel_error=panel_error,
+                open_id=open_id,
             )
 
         def _transaction(self, row_id: str, error: str) -> None:
@@ -372,18 +457,34 @@ def _handler_for(  # pylint: disable=too-many-statements
 
         def _report(self, query: Mapping[str, List[str]]) -> None:
             year = _year(_field(query, "tax_year"))
-            ran = _field(query, "run") == "1"
-            report = desk.report(year) if ran else None
+            report = None
+            error = ""
+            if desk.all_rows() or _field(query, "run") == "1":
+                try:
+                    report = desk.report(year)
+                except DeskError as exc:
+                    error = str(exc)
+            label = next(
+                (item["label"] for item in supported_years() if item["year"] == year),
+                str(year),
+            )
+            health_total = desk.health_count(year) if report else 0
+            ready = bool(report and report.get("integrity_ok") and health_total == 0)
             self._page(
                 "report.html",
-                "Report",
+                "Tax reports",
                 section="report",
                 report=report,
                 sa108=sa108_view(report, year) if report else None,
                 years=supported_years(),
                 tax_year=year,
+                year_label=label,
+                year_heading=year_title(label),
+                deadline=f"31 January {year + 1}",
+                ready=ready,
+                steps=guided_steps(desk.counts(), health_total),
                 records_path=str(desk.records_path),
-                error="",
+                error=error,
             )
 
         def _pack(self, query: Mapping[str, List[str]], pdf: bool) -> None:
@@ -510,6 +611,13 @@ def _handler_for(  # pylint: disable=too-many-statements
             context.setdefault("actor", self._req.session.user)
             context.setdefault("health_count", desk.health_count(DEFAULT_TAX_YEAR))
             context.setdefault("accountant_review", [])
+            context.setdefault("glossary", GLOSSARY)
+            context.setdefault("years", supported_years())
+            if "tax_year" not in context:
+                context["tax_year"] = tax_year_containing(date.today())
+            context["initials"] = initials(context["actor"] if context.get("signed_in") else "")
+            context["year_action"] = _year_action(urlparse(self.path).path)
+            context["year_keep"] = _year_keep(parse_qs(urlparse(self.path).query))
 
         def _static(self, path: str) -> None:
             name = path[len("/static/") :]
@@ -521,6 +629,10 @@ def _handler_for(  # pylint: disable=too-many-statements
                 self._plain(404, "Not found.")
                 return
             mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
+            if name.endswith(".js"):
+                mime = "text/javascript; charset=utf-8"
+            elif name.endswith(".css"):
+                mime = "text/css; charset=utf-8"
             self._send(200, file_path.read_bytes(), mime)
 
         def _redirect(self, location: str) -> None:
@@ -562,6 +674,27 @@ def _handler_for(  # pylint: disable=too-many-statements
             return self.rfile.read(length)
 
     return Handler
+
+
+def _year_action(path: str) -> str:
+    if path in {"/", "/report", "/health", "/review", "/koinly", "/plan"}:
+        return path
+    return "/report"
+
+
+def _year_keep(query: Mapping[str, List[str]]) -> List[Dict[str, str]]:
+    kept = []
+    for key in ("range", "run", "hq", "hsort", "hdir"):
+        value = _field(query, key)
+        if value:
+            kept.append({"key": key, "value": value})
+    return kept
+
+
+def _per_page(value: str) -> Optional[int]:
+    if value in {"25", "50", "100"}:
+        return int(value)
+    return None
 
 
 def _year(value: str) -> int:

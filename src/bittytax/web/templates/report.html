@@ -1,28 +1,69 @@
 {% extends "base.html" %}
+{% import "macros.html" as ui with context %}
 {% block body %}
-    <h1>Report</h1>
-    <p class="lede">Figures are produced by the BittyTax calculator for a UK individual. This page does not apply a tax rule of its own. The default year is 2025/26. 2024/25 still uses the calculator's 30 October 2024 split.</p>
-    <form method="get" action="/report">
-        <input type="hidden" name="run" value="1">
-        <label for="tax_year">Tax year</label>
-        <select id="tax_year" name="tax_year">
-            {% for item in years %}
-                <option value="{{ item.year }}"
-                        {% if item.year == tax_year %}selected{% endif %}>{{ item.label }}</option>
-            {% endfor %}
-        </select>
-        <button type="submit">Run report</button>
-    </form>
-    {% if error %}
-        <p class="warn">{{ error }}</p>
-    {% endif %}
+    {{ ui.steps(steps) }}
+    <div class="page-head">
+        <div>
+            <h1>{{ year_heading }}</h1>
+            <p class="lede">
+                Figures are produced by the BittyTax calculator for a UK individual. This page does not apply a tax rule of its own. The default year is 2025/26. 2024/25 still uses the calculator's 30 October 2024 split.
+            </p>
+            <p>
+                {% if ready %}
+                    <span class="status ok">Ready</span>
+                {% else %}
+                    <span class="status progress">In progress</span>
+                {% endif %}
+            </p>
+            <form method="get" action="/report">
+                <input type="hidden" name="run" value="1">
+                <label for="tax_year">Tax year</label>
+                <select id="tax_year" name="tax_year">
+                    {% for item in years %}
+                        <option value="{{ item.year }}"
+                                {% if item.year == tax_year %}selected{% endif %}>{{ item.label }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="ghost">Show</button>
+            </form>
+        </div>
+        <section class="card pad deadline">
+            <span class="muted">Online filing deadline</span>
+            <strong>{{ deadline }}</strong>
+        </section>
+    </div>
+    {% if error %}<p class="warn">{{ error }}</p>{% endif %}
     {% if report %}
-        <p>Period {{ report.start }} to {{ report.end }} ({{ report.timezone }}). Currency {{ report.currency }}.</p>
-        {% if report.integrity_ok %}
-            <p class="note">Integrity check passed.</p>
-        {% else %}
-            <p class="warn">Integrity check failed. The calculator would stop before printing a report until the review queue is clear. The figures below are still the calculator's figures for these records.</p>
-        {% endif %}
+        <section class="card pad">
+            <div class="figures">
+                <p>
+                    <span class="figure {% if report.summary.gain.startswith('-') %}down{% else %}up{% endif %}">{{ report.summary.gain|gbp }}</span>
+                    <span>Gain {{ ui.tip("annual_exempt") }}</span>
+                </p>
+                <p>
+                    <span class="figure down">{{ report.summary.losses|gbp }}</span>
+                    <span>Losses</span>
+                </p>
+                <p>
+                    <span class="figure">{{ report.summary.proceeds|gbp }}</span>
+                    <span>Disposal proceeds</span>
+                </p>
+            </div>
+            <p class="fine">
+                Period {{ report.start }} to {{ report.end }} ({{ report.timezone }}). Currency {{ report.currency }}.
+                {% if report.integrity_ok %}
+                    Integrity check passed.
+                {% else %}
+                    Integrity check failed. The calculator would stop before printing a report until the review queue is clear. The figures below are still the calculator's figures for these records.
+                {% endif %}
+            </p>
+            <div class="actions">
+                <a class="btn primary"
+                   href="/report/pack.pdf?tax_year={{ report.tax_year }}">PDF</a>
+                <a class="btn" href="/report.csv?tax_year={{ report.tax_year }}">CSV</a>
+                <a class="btn ghost" href="/report/pack?tax_year={{ report.tax_year }}">Printable page</a>
+            </div>
+        </section>
         <h2>Capital gains</h2>
         <table>
             <tbody>
@@ -35,7 +76,7 @@
                     <td>{{ report.summary.proceeds | gbp }}</td>
                 </tr>
                 <tr>
-                    <th>Allowable costs (including the purchase price)</th>
+                    <th>Allowable costs (including the purchase price) {{ ui.tip("allowable_costs") }}</th>
                     <td>{{ report.summary.allowable_costs | gbp }}</td>
                 </tr>
                 <tr>
@@ -66,7 +107,7 @@
             <p class="warn">Disposal proceeds are at or above the calculator's proceeds limit ({{ report.summary.proceeds_limit | gbp }}).</p>
         {% endif %}
         {% if sa108 %}
-            <h2>SA108 cryptoassets (form {{ sa108.form_title }})</h2>
+            <h2>SA108 cryptoassets (form {{ sa108.form_title }}) {{ ui.tip("sa108") }}</h2>
             {% if sa108.banner %}
                 <p class="banner">{{ sa108.banner }}. The box numbers and the figures below are not confirmed. An accountant still has to check them before anyone files.</p>
             {% endif %}
@@ -224,7 +265,7 @@
                 </tr>
             </tbody>
         </table>
-        <h2>Section 104 pools</h2>
+        <h2>Section 104 pools {{ ui.tip("s104") }} {{ ui.tip('same_day', '-sd') }} {{ ui.tip('thirty_day', '-30') }}</h2>
         <h3>At the start {% if report.pools.start_as_of %}({{ report.pools.start_as_of }}){% endif %}</h3>
         {% if report.pools.start %}
             <table>

@@ -60,6 +60,8 @@ Tax rules live in `config/sa108/` and `config/rules/`, one file per tax year, in
 
 This is not tax advice. BittyTax is copyright Nano Nano Ltd and licensed under AGPL-3.0. See [License/Disclaimer](#licensedisclaimer).
 
+The pages use the name UK Crypto Tax Desk. A sidebar links to Home, Tax reports, Wallets, Transactions, Data health, Planning, the Koinly check, and Settings. Home shows an illustrative value chart from the latest cached prices, the annual exempt amount, and the holdings. Tax reports keeps the calculator's gain, loss, and SA108 boxes, with an online filing date of 31 January after the tax year. Transactions open in a side panel for reclassification. Wallets lists each import. Add data accepts a CSV or XLSX file, matches the header to a conversion parser, and then shows how many rows were imported, skipped, or warned. Short explanations of the Section 104 pool, the same-day rule, the 30-day rule, the SA108 boxes, the annual exempt amount, and allowable costs are in `src/bittytax/web/glossary.py`. A reviewer can edit that wording. It is not a tax rule and it is not advice. Dark mode is stored in the browser only. The sign-in rules are unchanged: this computer at `127.0.0.1` does not ask for a password, and a browser on the tailnet does.
+
 ### Install on a Mac
 
 Install Python 3.10 or newer, then, from a checkout of this repository:

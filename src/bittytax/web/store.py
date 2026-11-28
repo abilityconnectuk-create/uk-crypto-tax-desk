@@ -12,6 +12,7 @@ import os
 import threading
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
@@ -127,21 +128,30 @@ class Desk:
         return self._effective_rows()
 
     def transactions(
-        self, filters: Optional[Mapping[str, str]] = None, page: int = 1
+        self,
+        filters: Optional[Mapping[str, str]] = None,
+        page: int = 1,
+        per_page: Optional[int] = None,
+        sort: str = "",
     ) -> Dict[str, Any]:
         chosen = _filters(filters)
         rows = self._effective_rows()
         matched = [row for row in rows if _matches(row, chosen)]
+        ordered = _sort_rows(matched, sort)
+        size = _page_size(per_page)
         page = max(page, 1)
-        start = (page - 1) * PAGE_SIZE
+        start = (page - 1) * size
         return {
-            "rows": matched[start : start + PAGE_SIZE],
-            "total": len(matched),
+            "rows": ordered[start : start + size],
+            "total": len(ordered),
             "page": page,
-            "pages": max(1, (len(matched) + PAGE_SIZE - 1) // PAGE_SIZE),
+            "pages": max(1, (len(ordered) + size - 1) // size),
+            "per_page": size,
+            "sort": sort,
             "assets": _unique(rows, "assets"),
             "wallets": _unique(rows, "wallets"),
             "types": _unique(rows, "types"),
+            "tags": _unique_tags(rows),
         }
 
     def transaction(self, row_id: str) -> Dict[str, Any]:
@@ -399,6 +409,8 @@ def _filters(filters: Optional[Mapping[str, str]]) -> Dict[str, str]:
         "wallet": "",
         "kind": "",
         "status": "",
+        "tag": "",
+        "extra": "",
     }
     if filters:
         for key in chosen:
@@ -407,21 +419,83 @@ def _filters(filters: Optional[Mapping[str, str]]) -> Dict[str, str]:
 
 
 def _matches(row: Mapping[str, Any], chosen: Mapping[str, str]) -> bool:
+    haystack = " ".join(str(cell) for cell in row["cells"]).casefold()
+    query = chosen["query"].casefold()
+    tag = chosen["tag"].casefold()
+    note = str(row["note"]).casefold()
+    extra = chosen["extra"].casefold()
     checks = (
         not chosen["date_from"] or str(row["date"]) >= chosen["date_from"],
         not chosen["date_to"] or str(row["date"]) <= chosen["date_to"],
         not chosen["asset"] or chosen["asset"] in row["assets"],
         not chosen["wallet"] or row["wallet"] == chosen["wallet"],
         not chosen["kind"] or row["type"] == chosen["kind"],
-        not chosen["status"] or row["status"] == chosen["status"],
+        _status_ok(str(row["status"]), chosen["status"]),
+        not query or query in haystack or query in str(row["id"]).casefold(),
+        not tag or tag in note or tag == str(row["status"]).casefold(),
+        not extra or extra in haystack,
     )
-    if not all(checks):
-        return False
-    query = chosen["query"].casefold()
-    if not query:
+    return all(checks)
+
+
+def _status_ok(actual: str, wanted: str) -> bool:
+    if not wanted:
         return True
-    haystack = " ".join(str(cell) for cell in row["cells"]).casefold()
-    return query in haystack or query in str(row["id"]).casefold()
+    if wanted == "warnings":
+        return actual in {"needs-review", "spam", "unmapped"}
+    return actual == wanted
+
+
+def _page_size(per_page: Optional[int]) -> int:
+    if per_page in (25, 50, 100):
+        return int(per_page)
+    return PAGE_SIZE
+
+
+def _sort_rows(rows: List[Dict[str, Any]], sort: str) -> List[Dict[str, Any]]:
+    if sort == "value":
+        return sorted(rows, key=_row_value, reverse=True)
+    if sort == "type":
+        return sorted(rows, key=lambda row: (str(row["type"]), str(row["timestamp"])))
+    if sort == "asset":
+        return sorted(rows, key=lambda row: (_first_asset(row), str(row["timestamp"])))
+    if sort == "date":
+        return sorted(rows, key=lambda row: str(row["timestamp"]), reverse=True)
+    if sort == "date_asc":
+        return sorted(rows, key=lambda row: str(row["timestamp"]))
+    return list(rows)
+
+
+def _first_asset(row: Mapping[str, Any]) -> str:
+    assets = row.get("assets") or []
+    return str(assets[0]) if assets else ""
+
+
+def _row_value(row: Mapping[str, Any]) -> Decimal:
+    for key in ("sell_value", "buy_value", "fee_value"):
+        amount = _money(row.get(key))
+        if amount != 0:
+            return amount
+    return Decimal(0)
+
+
+def _money(value: object) -> Decimal:
+    try:
+        return Decimal(str(value or "0").replace(",", ""))
+    except InvalidOperation:
+        return Decimal(0)
+
+
+def _unique_tags(rows: Sequence[Mapping[str, Any]]) -> List[str]:
+    found = set()
+    for row in rows:
+        status = str(row.get("status") or "")
+        if status and status != "clear":
+            found.add(status)
+        note = str(row.get("note") or "").strip()
+        if note and len(note) <= 24 and " " not in note:
+            found.add(note)
+    return sorted(found)
 
 
 def _unique(rows: Sequence[Mapping[str, Any]], field: str) -> List[str]:
