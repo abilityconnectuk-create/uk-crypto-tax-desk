@@ -89,7 +89,7 @@ def parse_complete(text: str) -> Tuple[Dict[str, Dict[str, Decimal]], List[Dict[
 
 
 def store_uploads(root: Path, tax_year: int, summary: bytes, complete: bytes) -> Path:
-    """Keep the uploads in the data directory. Callers must not write them into the repo."""
+    """Keep the uploads in the data directory. Callers must not commit them with the source."""
     folder = root / "koinly" / str(tax_year)
     folder.mkdir(parents=True, exist_ok=True)
     if summary:

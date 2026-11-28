@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # Fork of BittyTax (AGPL-3.0). See LICENSE.
-"""2026-27 is a stub copy, and the config page only displays the rule files."""
+"""2026-27 is a stub copy, and the rules page only displays the rule files."""
 
 from __future__ import annotations
 

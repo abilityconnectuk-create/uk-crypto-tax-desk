@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # Fork of BittyTax (AGPL-3.0). See LICENSE.
-"""Map the calculator's capital-gains totals onto the SA108 boxes in config."""
+"""Map the calculator's capital-gains totals onto the SA108 boxes in the rule files."""
 
 from __future__ import annotations
 

@@ -95,7 +95,7 @@ def defi_tags() -> List[Dict[str, str]]:
 
 
 def accountant_review_items(ending_year: int) -> List[Dict[str, str]]:
-    """Items the config marks for an accountant. Nothing here is applied."""
+    """Items a rule file marks for an accountant. Nothing here is applied."""
     items: List[Dict[str, str]] = []
     sa108 = load_sa108(ending_year) or {}
     for box in sa108.get("boxes", []):
@@ -126,7 +126,7 @@ def accountant_review_items(ending_year: int) -> List[Dict[str, str]]:
 
 
 def confirmed_flags(node: object) -> List[bool]:
-    """Every ``confirmed`` flag in a loaded file, for tests and the config page."""
+    """Every ``confirmed`` flag in a loaded file, for tests and the rules page."""
     found: List[bool] = []
     if isinstance(node, dict):
         if "confirmed" in node:

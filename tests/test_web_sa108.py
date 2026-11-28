@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # Fork of BittyTax (AGPL-3.0). See LICENSE.
-"""SA108 boxes come from config and the calculator's gross figures."""
+"""SA108 boxes come from the rule files and the calculator's gross figures."""
 
 from __future__ import annotations
 
