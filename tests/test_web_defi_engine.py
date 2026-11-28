@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # Fork of BittyTax (AGPL-3.0). See LICENSE.
-"""A confirmed DeFi tag can change the calculator type. Rebasing cannot."""
+"""A confirmed DeFi tag can change the calculator type. The accountant case cannot."""
 
 from __future__ import annotations
 

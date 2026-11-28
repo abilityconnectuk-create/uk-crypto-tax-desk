@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # Fork of BittyTax (AGPL-3.0). See LICENSE.
-"""DeFi tags follow the reviewed rule file. Rebasing stays with the accountant."""
+"""DeFi tags follow the reviewed rule file. The receipt-token case stays with the accountant."""
 
 from __future__ import annotations
 
