@@ -434,7 +434,7 @@ def _chart_svg(points: Sequence[Point]) -> str:
 
 
 def _ring(slices: Sequence[Mapping[str, str]]) -> str:
-    """SVG ring built only from numbers, with no asset names inside."""
+    """A ring built only from numbers, with no asset names inside."""
     if not slices:
         return ""
     radius = 42

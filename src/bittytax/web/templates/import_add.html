@@ -1,14 +1,10 @@
 {% extends "base.html" %}
+{% import "macros.html" as ui %}
 {% block body %}
     <div class="flow">
         <div class="page-head">
             <p class="eyebrow">Add your data</p>
-            <a class="icon-btn" href="/import" aria-label="Close">
-                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-                    </path>
-                </svg>
-            </a>
+            <a class="icon-btn" href="/import" aria-label="Close">{{ ui.icon("close") }}</a>
         </div>
         <ol class="progress" aria-label="Import progress">
             <li class="on">Upload</li>
