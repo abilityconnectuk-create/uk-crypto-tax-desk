@@ -28,9 +28,12 @@ from .convert import (
 )
 from .engine_run import report_csv, run_tax_year
 from .errors import DeskError
+from .health import analyse
+from .rules import defi_tags
 
 PAGE_SIZE = 50
 _SPECIAL = {NEEDS_REVIEW, POSSIBLE_SPAM, IGNORED}
+_VALUE_INDEX = {"buy_value": 3, "sell_value": 6, "fee_value": 9}
 
 
 class Desk:
@@ -120,6 +123,9 @@ class Desk:
     def imports(self) -> List[Dict[str, Any]]:
         return list(_read_json(self.root / "imports.json", {"imports": []})["imports"])
 
+    def all_rows(self) -> List[Dict[str, Any]]:
+        return self._effective_rows()
+
     def transactions(
         self, filters: Optional[Mapping[str, str]] = None, page: int = 1
     ) -> Dict[str, Any]:
@@ -143,10 +149,22 @@ class Desk:
             if row["id"] == row_id:
                 row["log"] = [item for item in self.change_log() if item["row_id"] == row_id]
                 row["allowed_types"] = allowed_types()
+                catalog = defi_tags()
+                row["defi_tags"] = catalog
+                chosen = ""
+                for item in row["log"]:
+                    if item.get("tag"):
+                        chosen = str(item["tag"])
+                row["tag"] = chosen
+                row["tag_note"] = next(
+                    (item["note"] for item in catalog if item["id"] == chosen), ""
+                )
                 return row
         raise DeskError("That transaction is not in the ledger.")
 
-    def reclassify(self, row_id: str, new_type: str, why: str, actor: str) -> Dict[str, str]:
+    def reclassify(
+        self, row_id: str, new_type: str, why: str, actor: str, tag: str = ""
+    ) -> Dict[str, str]:
         cleaned = why.strip()
         if not cleaned:
             raise DeskError("Say why this type should change.")
@@ -154,11 +172,17 @@ class Desk:
             raise DeskError("Choose a BittyTax transaction type.")
         if len(cleaned) > 500:
             raise DeskError("The reason is too long.")
+        chosen = tag.strip()
+        known = {item["id"] for item in defi_tags()}
+        if chosen and chosen not in known:
+            raise DeskError("Choose a DeFi tag from the rule file.")
         with self._lock:
             current = self.transaction(row_id)
             before = str(current["type"])
-            if before == new_type:
+            if before == new_type and not chosen:
                 raise DeskError("That row already has this type.")
+            if before == new_type and chosen == str(current.get("tag", "")):
+                raise DeskError("That row already has this tag.")
             entry = {
                 "row_id": row_id,
                 "at": _stamp(),
@@ -166,6 +190,7 @@ class Desk:
                 "why": cleaned,
                 "before_type": before,
                 "after_type": new_type,
+                "tag": chosen,
             }
             with (self.root / "reclassifications.jsonl").open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(entry, ensure_ascii=True, sort_keys=True) + "\n")
@@ -233,6 +258,24 @@ class Desk:
     def report_csv(self, tax_year: int) -> str:
         return report_csv(self.report(tax_year))
 
+    def health(self, tax_year: int) -> Dict[str, Any]:
+        """Ledger problems for one tax year. A calculator failure does not hide the others."""
+        rows = self._effective_rows()
+        missing: List[Dict[str, str]] = []
+        note = ""
+        if rows:
+            try:
+                missing = list(self.report(tax_year).get("missing_cost", []))
+            except DeskError as exc:
+                note = str(exc)
+        packed = analyse(rows, self.review_lists(), missing)
+        packed["calculator_note"] = note
+        packed["tax_year"] = tax_year
+        return packed
+
+    def health_count(self, tax_year: int) -> int:
+        return int(self.health(tax_year)["total"])
+
     def counts(self) -> Dict[str, int]:
         review = self.review_lists()
         rows = self._effective_rows()
@@ -257,8 +300,24 @@ class Desk:
                 rows.extend(block.get(key, []))
         return collected
 
+    def price_fills(self) -> List[Dict[str, str]]:
+        return _read_jsonl(self.root / "price-fills.jsonl")
+
+    def apply_price_fills(self, entries: Sequence[Mapping[str, str]]) -> None:
+        """Append GBP values. The uploaded file is not edited."""
+        if not entries:
+            return
+        with self._lock:
+            with (self.root / "price-fills.jsonl").open("a", encoding="utf-8") as handle:
+                for entry in entries:
+                    handle.write(json.dumps(dict(entry), ensure_ascii=True, sort_keys=True) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            self._write_effective_unlocked()
+
     def _effective_rows(self) -> List[Dict[str, Any]]:
         changes = _latest_changes(self.change_log())
+        fills = _latest_fills(self.price_fills())
         rows = []
         for stored in self._ledger_rows():
             cells = list(stored["cells"])
@@ -266,6 +325,10 @@ class Desk:
             changed = change is not None
             if change is not None:
                 cells[0] = change["after_type"]
+            for field, entry in fills.get(stored["id"], {}).items():
+                index = _VALUE_INDEX.get(field)
+                if index is not None:
+                    cells[index] = entry["value"]
             rows.append(_present(stored["id"], stored["import_id"], cells, changed))
         return rows
 
@@ -302,6 +365,9 @@ def _present(row_id: str, import_id: str, cells: Sequence[str], changed: bool) -
         "sell_quantity": cells[4],
         "sell_asset": cells[5],
         "sell_value": cells[6],
+        "fee_quantity": cells[7],
+        "fee_asset": cells[8],
+        "fee_value": cells[9],
         "wallet": cells[10],
         "timestamp": cells[11],
         "date": cells[11][:10],
@@ -375,6 +441,23 @@ def _latest_changes(log: Sequence[Mapping[str, str]]) -> Dict[str, Mapping[str, 
     for entry in log:
         latest[entry["row_id"]] = entry
     return latest
+
+
+def _latest_fills(log: Sequence[Mapping[str, str]]) -> Dict[str, Dict[str, Mapping[str, str]]]:
+    latest: Dict[str, Dict[str, Mapping[str, str]]] = {}
+    for entry in log:
+        latest.setdefault(entry["row_id"], {})[entry["field"]] = entry
+    return latest
+
+
+def _read_jsonl(path: Path) -> List[Dict[str, str]]:
+    if not path.is_file():
+        return []
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            rows.append(json.loads(line))
+    return rows
 
 
 def _manifest_entry(

@@ -1,0 +1,258 @@
+# Tax parameters for the year ending 5 April 2025. Copied beside the calculator.
+# Every value stays unconfirmed until an accountant signs it off.
+tax_year: "2024-25"
+ending_year: 2025
+confirmed: false
+sources:
+  - title: Self Assessment capital gains summary (SA108)
+    url: https://www.gov.uk/government/publications/self-assessment-capital-gains-summary-sa108
+  - title: CRYPTO23000
+    url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto23000
+parameters:
+  annual_exempt_amount:
+    value: "3000"
+    confirmed: false
+    note: Display the allowance. Do not deduct it from the SA108 crypto boxes.
+    sources:
+      - title: Self Assessment capital gains summary (SA108)
+        url: https://www.gov.uk/government/publications/self-assessment-capital-gains-summary-sa108
+  basic_rate:
+    value: "10"
+    confirmed: false
+    note: Rate before 30 October 2024, as already used by the calculator.
+    sources:
+      - title: Self Assessment capital gains summary (SA108)
+        url: https://www.gov.uk/government/publications/self-assessment-capital-gains-summary-sa108
+  higher_rate:
+    value: "20"
+    confirmed: false
+    note: Rate before 30 October 2024, as already used by the calculator.
+    sources:
+      - title: Self Assessment capital gains summary (SA108)
+        url: https://www.gov.uk/government/publications/self-assessment-capital-gains-summary-sa108
+  basic_rate_after_split:
+    value: "18"
+    confirmed: false
+    note: Rate on or after 30 October 2024, as already used by the calculator.
+    sources:
+      - title: Self Assessment capital gains summary (SA108)
+        url: https://www.gov.uk/government/publications/self-assessment-capital-gains-summary-sa108
+  higher_rate_after_split:
+    value: "24"
+    confirmed: false
+    note: Rate on or after 30 October 2024, as already used by the calculator.
+    sources:
+      - title: Self Assessment capital gains summary (SA108)
+        url: https://www.gov.uk/government/publications/self-assessment-capital-gains-summary-sa108
+  split_date:
+    value: "2024-10-30"
+    confirmed: false
+    note: Disposals before this date use the earlier rates. Later disposals use the later rates.
+    sources:
+      - title: Self Assessment capital gains summary (SA108)
+        url: https://www.gov.uk/government/publications/self-assessment-capital-gains-summary-sa108
+  proceeds_reporting_threshold:
+    value: "50000"
+    confirmed: false
+    note: Disposal proceeds over this amount are a reporting trigger. Not a four-times allowance test.
+    sources:
+      - title: Self Assessment capital gains summary (SA108)
+        url: https://www.gov.uk/government/publications/self-assessment-capital-gains-summary-sa108
+  gains_reporting_threshold:
+    value: "3000"
+    confirmed: false
+    note: Gains over this amount are a reporting trigger. Not a four-times allowance test.
+    sources:
+      - title: Self Assessment capital gains summary (SA108)
+        url: https://www.gov.uk/government/publications/self-assessment-capital-gains-summary-sa108
+  trading_misc_allowance:
+    value: "1000"
+    confirmed: false
+    note: >
+      Show beside staking rewards. Whether the activity is a trade is
+      accountant review. Do not deduct it here.
+    sources:
+      - title: CRYPTO21200
+        url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto21200
+valuation:
+  method: GBP market value at the time of the event, using one method and keeping a record of it.
+  manual: CRYPTO23000
+  confirmed: false
+  sources:
+    - title: CRYPTO23000
+      url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto23000
+defi:
+  confirmed: false
+  note: >
+    Valuation is GBP at the time of the event, with one method recorded.
+    None of these treatments is applied to the calculator while unconfirmed.
+  sources:
+    - title: CRYPTO23000
+      url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto23000
+  tags:
+    - id: own_wallet_transfer
+      label: Own-wallet transfer
+      effect: not_disposal
+      confirmed: false
+      accountant_review: false
+      manual: CRYPTO22100
+      note: >
+        A transfer between the person's own wallets is not a disposal.
+        Matching is same-day, then 30-day, then section 104.
+      sources:
+        - title: CRYPTO22100
+          url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto22100
+        - title: CRYPTO22200
+          url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto22200
+    - id: loan_drawdown
+      label: Loan drawdown
+      effect: acquisition_at_repayment_obligation
+      confirmed: false
+      accountant_review: true
+      manual: CRYPTO61630
+      note: >
+        Acquisition at the value of the repayment obligation. The valuation
+        date is accountant review.
+      sources:
+        - title: CRYPTO61630
+          url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61630
+    - id: loan_repayment
+      label: Loan repayment
+      effect: disposal_at_market_value
+      confirmed: false
+      accountant_review: true
+      manual: CRYPTO61650
+      note: >
+        Disposal of the tokens handed over at market value, including any
+        extra. Whether interest is deductible is accountant review.
+      sources:
+        - title: CRYPTO61650
+          url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61650
+    - id: collateral_deposit
+      label: Collateral deposit
+      effect: accountant_review
+      confirmed: false
+      accountant_review: true
+      manual: CRYPTO61640
+      options: [disposal_at_MV, not_disposal, accountant_review]
+      default: accountant_review
+      protocols: {}
+      note: >
+        Per-protocol setting of disposal at market value, not a disposal, or
+        accountant review. The default is accountant review.
+      sources:
+        - title: CRYPTO61640
+          url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61640
+    - id: collateral_withdrawal
+      label: Collateral withdrawal
+      effect: accountant_review
+      confirmed: false
+      accountant_review: true
+      manual: CRYPTO61640
+      note: >
+        Acquisition at market value if the deposit was a disposal, otherwise
+        no capital gains effect. Depends on the deposit treatment.
+      sources:
+        - title: CRYPTO61640
+          url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61640
+    - id: liquidation
+      label: Liquidation
+      effect: accountant_review
+      confirmed: false
+      accountant_review: true
+      manual: CRYPTO61640, CRYPTO61675
+      note: >
+        No further effect if the deposit was a disposal, otherwise a disposal
+        at market value (TCGA 1992 s26(2)). A penalty is not deductible.
+      sources:
+        - title: CRYPTO61640
+          url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61640
+        - title: CRYPTO61675
+          url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61675
+    - id: staking_reward
+      label: Staking reward
+      effect: miscellaneous_income
+      confirmed: false
+      accountant_review: true
+      manual: CRYPTO21200
+      note: >
+        Miscellaneous income at the GBP value on receipt, and that value
+        becomes cost. Show the trading and miscellaneous allowance of 1000.
+        Whether it is a trade is accountant review. Do not deduct the allowance.
+      sources:
+        - title: CRYPTO21200
+          url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto21200
+    - id: defi_return
+      label: DeFi lending or staking return
+      effect: accountant_review
+      confirmed: false
+      accountant_review: true
+      manual: CRYPTO61212, CRYPTO61213, CRYPTO61214
+      note: Income or capital is accountant review.
+      sources:
+        - title: CRYPTO61212
+          url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61212
+        - title: CRYPTO61213
+          url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61213
+        - title: CRYPTO61214
+          url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61214
+    - id: lp_deposit
+      label: Liquidity pool deposit
+      effect: disposal_if_beneficial_ownership_passes
+      confirmed: false
+      accountant_review: true
+      manual: CRYPTO61620
+      note: >
+        Disposal if beneficial ownership passes. Proceeds are the market value
+        of the receipt token, which becomes its cost. Several tokens are
+        apportioned just and reasonably. AMM and DEX pools are accountant review.
+      sources:
+        - title: CRYPTO61620
+          url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61620
+    - id: lp_withdrawal
+      label: Liquidity pool withdrawal
+      effect: disposal_of_receipt_token
+      confirmed: false
+      accountant_review: true
+      manual: CRYPTO61650
+      note: >
+        Disposal of the receipt token at the market value of what is returned.
+        AMM and DEX pools are accountant review.
+      sources:
+        - title: CRYPTO61650
+          url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto61650
+    - id: airdrop
+      label: Airdrop
+      effect: income_only_for_a_service
+      confirmed: false
+      accountant_review: true
+      manual: CRYPTO21250, CRYPTO22350
+      note: >
+        Income only if received for, or in expectation of, a service. It has
+        its own section 104 pool, and section 43 does not apply. Whether cost
+        is nil or market value is accountant review.
+      sources:
+        - title: CRYPTO21250
+          url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto21250
+        - title: CRYPTO22350
+          url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto22350
+    - id: rebasing
+      label: Rebasing receipt token
+      effect: accountant_review
+      confirmed: false
+      accountant_review: true
+      manual: CRYPTO23000
+      note: Rebasing receipt tokens are accountant review.
+      sources:
+        - title: CRYPTO23000
+          url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto23000
+    - id: vault_wrapper
+      label: Vault wrapper
+      effect: accountant_review
+      confirmed: false
+      accountant_review: true
+      manual: CRYPTO23000
+      note: Vault wrappers are accountant review.
+      sources:
+        - title: CRYPTO23000
+          url: https://www.gov.uk/hmrc-internal-manuals/cryptoassets-manual/crypto23000

@@ -30,10 +30,18 @@ from .auth import (
     safe_next,
 )
 from .config_view import config_snapshot
+from .dashboard import dashboard
 from .engine_run import supported_years
 from .errors import DeskError
 from .identity import LOOPBACK, actor_for, trusted_tailscale_user
+from .koinly_check import compare_year, load_uploads, store_uploads
+from .pack import pack_context, pack_lines, render_pdf
+from .planning import hypothetical, plan_view
+from .prices import fetch_missing, load_misses, missing_slots
+from .rules import accountant_review_items, list_rule_years
+from .sa108 import sa108_view
 from .store import Desk
+from .sync import import_ethereum, import_kraken, secrets_present
 
 _STATIC = Path(__file__).resolve().parent / "static"
 _ROW_PATH = re.compile(r"^/transactions/([0-9A-Za-zT-]+)/([0-9]+)$")
@@ -90,7 +98,9 @@ class _Request:  # pylint: disable=too-few-public-methods
         self.host_name = ""
 
 
-def _handler_for(desk: Desk, desk_auth: DeskAuth, bind_host: str) -> type:
+def _handler_for(  # pylint: disable=too-many-statements
+    desk: Desk, desk_auth: DeskAuth, bind_host: str
+) -> type:
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         _req: _Request
@@ -207,8 +217,20 @@ def _handler_for(desk: Desk, desk_auth: DeskAuth, bind_host: str) -> type:
                 ("POST", "/import"): self._import_post,
                 ("GET", "/transactions"): lambda: self._transactions(query),
                 ("GET", "/review"): lambda: self._review(query),
+                ("GET", "/health"): lambda: self._health(query),
                 ("GET", "/report"): lambda: self._report(query),
+                ("GET", "/report/pack"): lambda: self._pack(query, pdf=False),
+                ("GET", "/report/pack.pdf"): lambda: self._pack(query, pdf=True),
                 ("GET", "/report.csv"): lambda: self._report_csv(query),
+                ("GET", "/koinly"): lambda: self._koinly(query),
+                ("POST", "/koinly"): self._koinly_post,
+                ("GET", "/prices"): self._prices,
+                ("POST", "/prices/fetch"): self._prices_fetch,
+                ("GET", "/plan"): lambda: self._plan("", None, {}),
+                ("POST", "/plan"): self._plan_post,
+                ("GET", "/sync"): self._sync,
+                ("POST", "/sync/ethereum"): self._sync_ethereum,
+                ("POST", "/sync/kraken"): self._sync_kraken,
                 ("GET", "/config"): self._config,
                 ("GET", "/about"): self._about,
             }
@@ -220,7 +242,12 @@ def _handler_for(desk: Desk, desk_auth: DeskAuth, bind_host: str) -> type:
 
         def _home(self) -> None:
             self._page(
-                "home.html", "Desk", section="home", counts=desk.counts(), imports=desk.imports()
+                "home.html",
+                "Desk",
+                section="home",
+                counts=desk.counts(),
+                imports=desk.imports(),
+                board=dashboard(desk),
             )
 
         def _import_form(self) -> None:
@@ -266,7 +293,13 @@ def _handler_for(desk: Desk, desk_auth: DeskAuth, bind_host: str) -> type:
                     host=self._req.host_name,
                     session_user=self._req.session.user,
                 )
-                desk.reclassify(row_id, _form_value(form, "type"), _form_value(form, "why"), actor)
+                desk.reclassify(
+                    row_id,
+                    _form_value(form, "type"),
+                    _form_value(form, "why"),
+                    actor,
+                    _form_value(form, "tag"),
+                )
             except DeskError as exc:
                 self._transaction(row_id, str(exc))
                 return
@@ -314,6 +347,18 @@ def _handler_for(desk: Desk, desk_auth: DeskAuth, bind_host: str) -> type:
             self._remember(desk_auth.new_session())
             self._redirect("/")
 
+        def _health(self, query: Mapping[str, List[str]]) -> None:
+            year = _year(_field(query, "tax_year"))
+            self._page(
+                "health.html",
+                "Health",
+                section="health",
+                health=desk.health(year),
+                years=supported_years(),
+                tax_year=year,
+                accountant_review=accountant_review_items(year),
+            )
+
         def _review(self, query: Mapping[str, List[str]]) -> None:
             year = _year(_field(query, "tax_year"))
             self._page(
@@ -334,11 +379,98 @@ def _handler_for(desk: Desk, desk_auth: DeskAuth, bind_host: str) -> type:
                 "Report",
                 section="report",
                 report=report,
+                sa108=sa108_view(report, year) if report else None,
                 years=supported_years(),
                 tax_year=year,
                 records_path=str(desk.records_path),
                 error="",
             )
+
+        def _pack(self, query: Mapping[str, List[str]], pdf: bool) -> None:
+            year = _year(_field(query, "tax_year"))
+            context = pack_context(desk, year)
+            if pdf:
+                body = render_pdf(pack_lines(context))
+                if body is not None:
+                    self._send(200, body, "application/pdf", f"bittytax-{year}-pack.pdf")
+                    return
+            self._page("pack.html", "Report pack", section="report", **context)
+
+        def _koinly(self, query: Mapping[str, List[str]]) -> None:
+            year = _year(_field(query, "tax_year"))
+            summary, complete = load_uploads(desk.root, year)
+            comparison = (
+                compare_year(desk.report(year), summary, complete) if summary or complete else None
+            )
+            self._page(
+                "koinly.html",
+                "Koinly",
+                section="koinly",
+                comparison=comparison,
+                years=supported_years(),
+                tax_year=year,
+            )
+
+        def _koinly_post(self) -> None:
+            fields, files = _parts(self.headers.get("Content-Type", ""), self._req.raw)
+            year = _year(fields.get("tax_year", ""))
+            summary = files.get("summary", ("", b""))[1]
+            complete = files.get("complete", ("", b""))[1]
+            if not summary and not complete:
+                raise DeskError("Choose a Koinly summary or a complete tax report.")
+            store_uploads(desk.root, year, summary, complete)
+            self._redirect(f"/koinly?tax_year={year}")
+
+        def _prices(self) -> None:
+            rows = desk.all_rows()
+            self._page(
+                "prices.html",
+                "Prices",
+                section="prices",
+                missing=missing_slots(rows),
+                missed=load_misses(desk),
+            )
+
+        def _prices_fetch(self) -> None:
+            fetch_missing(desk)
+            self._redirect("/prices")
+
+        def _plan(
+            self, error: str, result: Optional[Dict[str, str]], form: Mapping[str, str]
+        ) -> None:
+            view = plan_view(desk)
+            view["result"] = result
+            blank = {"asset": "", "quantity": "", "day": "", "proceeds": ""}
+            blank.update(form)
+            self._page("plan.html", "Planning", section="plan", view=view, error=error, form=blank)
+
+        def _plan_post(self) -> None:
+            form = {
+                key: self._req.form.get(key, "") for key in ("asset", "quantity", "day", "proceeds")
+            }
+            try:
+                result = hypothetical(
+                    desk, form["asset"], form["quantity"], form["day"], form["proceeds"]
+                )
+            except DeskError as exc:
+                self._plan(str(exc), None, form)
+                return
+            self._plan("", result, form)
+
+        def _sync(self) -> None:
+            self._page("sync.html", "Sync", section="sync", secrets=secrets_present(desk))
+
+        def _sync_ethereum(self) -> None:
+            import_ethereum(
+                desk, self._req.form.get("address", ""), self._req.form.get("api_key", "")
+            )
+            self._redirect("/transactions?imported=ethereum")
+
+        def _sync_kraken(self) -> None:
+            import_kraken(
+                desk, self._req.form.get("api_key", ""), self._req.form.get("api_secret", "")
+            )
+            self._redirect("/transactions?imported=kraken")
 
         def _report_csv(self, query: Mapping[str, List[str]]) -> None:
             year = _year(_field(query, "tax_year"))
@@ -347,7 +479,11 @@ def _handler_for(desk: Desk, desk_auth: DeskAuth, bind_host: str) -> type:
 
         def _config(self) -> None:
             self._page(
-                "config.html", "Config", section="config", config=config_snapshot(desk.wallets_path)
+                "config.html",
+                "Config",
+                section="config",
+                config=config_snapshot(desk.wallets_path),
+                rule_years=list_rule_years(),
             )
 
         def _about(self) -> None:
@@ -372,6 +508,8 @@ def _handler_for(desk: Desk, desk_auth: DeskAuth, bind_host: str) -> type:
             context.setdefault("csrf", self._req.session.csrf)
             context.setdefault("signed_in", bool(self._req.session.user))
             context.setdefault("actor", self._req.session.user)
+            context.setdefault("health_count", desk.health_count(DEFAULT_TAX_YEAR))
+            context.setdefault("accountant_review", [])
 
         def _static(self, path: str) -> None:
             name = path[len("/static/") :]
@@ -466,20 +604,31 @@ def _form_value(form: Mapping[str, str], key: str) -> str:
 
 
 def _uploaded_file(content_type: str, body: bytes) -> Tuple[str, bytes]:
-    filename, _fields, payload = _multipart(content_type, body)
-    if payload is None:
+    _fields, files = _parts(content_type, body)
+    uploaded = files.get("file")
+    if uploaded is None and files:
+        uploaded = next(iter(files.values()))
+    if uploaded is None:
         raise DeskError("Choose a file to import.")
+    filename, payload = uploaded
     return filename or "upload.csv", payload
 
 
 def _multipart(content_type: str, body: bytes) -> Tuple[str, Dict[str, str], Optional[bytes]]:
+    fields, files = _parts(content_type, body)
+    if not files:
+        return "", fields, None
+    filename, payload = next(iter(files.values()))
+    return filename, fields, payload
+
+
+def _parts(content_type: str, body: bytes) -> Tuple[Dict[str, str], Dict[str, Tuple[str, bytes]]]:
     if "multipart/form-data" not in content_type:
         raise DeskError("The import form was not sent as a file upload.")
     header = f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8")
     message = BytesParser(policy=policy.default).parsebytes(header + body)
     fields: Dict[str, str] = {}
-    filename = ""
-    payload: Optional[bytes] = None
+    files: Dict[str, Tuple[str, bytes]] = {}
     if not message.is_multipart():
         raise DeskError("The import form was empty.")
     for part in message.iter_parts():
@@ -494,8 +643,7 @@ def _multipart(content_type: str, body: bytes) -> Tuple[str, Dict[str, str], Opt
             data = b""
         uploaded = part.get_filename()
         if uploaded:
-            filename = uploaded
-            payload = data
+            files[name] = (uploaded, data)
         else:
             fields[name] = data.decode("utf-8", errors="replace")
-    return filename, fields, payload
+    return fields, files

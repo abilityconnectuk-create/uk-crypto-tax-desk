@@ -52,7 +52,11 @@ If you are upgrading from a previous version of BittyTax, please follow the [upg
 
 ## Local web desk
 
-A browser desk sits on the same calculator. It binds to `127.0.0.1` and reads a directory on your machine. It does not upload transactions and it does not call a price service. On this computer the page does not ask for a password. A phone or another laptop reaches it through Tailscale Serve, on your tailnet only, and then a password is required. Do not publish the desk on the public internet.
+A browser desk sits on the same calculator. It binds to `127.0.0.1` and reads a directory on your machine. It does not upload your transactions anywhere. On this computer the page does not ask for a password. A phone or another laptop reaches it through Tailscale Serve, on your tailnet only, and then a password is required. Do not publish the desk on the public internet.
+
+A price is fetched only when you use Fetch missing prices, and a wallet or exchange is contacted only when you submit Sync. API keys are written in the data directory with mode 0600. They are not written to this repository and they are not printed in an error.
+
+Tax rules live in `config/sa108/` and `config/rules/`, one file per tax year, including a 2026-27 stub copied from 2025-26. Every rule is `confirmed: false`. The pages show an AWAITING TAX REVIEW banner and do not apply an unconfirmed rule. The Config page lists the parameters, the SA108 boxes and the DeFi tags. It does not edit them. The default tax year for a report is still 2025/26. The home page uses the tax year that contains today.
 
 This is not tax advice. BittyTax is copyright Nano Nano Ltd and licensed under AGPL-3.0. See [License/Disclaimer](#licensedisclaimer).
 
@@ -62,6 +66,12 @@ Install Python 3.10 or newer, then, from a checkout of this repository:
 
 ```bash
 python3 -m pip install -e .
+```
+
+The PDF download uses an optional library. Without it, the report pack is a page you can print from the browser.
+
+```bash
+python3 -m pip install -e ".[pdf]"
 ```
 
 ### Start
@@ -95,6 +105,16 @@ bittytax --nopdf --taxyear 2026 --skip-holdings ~/.uk-crypto-tax-desk/effective-
 ```
 
 The capital gains and income figures match. `examples/web-sample-review-koinly.csv`, with `examples/web-sample-wallets.yaml` copied to `wallets.yaml` in the data directory, exercises unmatched transfers, spam, an unmapped tag and a missing cost basis.
+
+Other pages, all using the same data directory:
+
+- Health lists missing cost basis, unmatched transfers, likely duplicates, missing prices and negative balances, and the accountant-review items from the rule files.
+- Report shows the SA108 crypto boxes for the year. Gross gains and gross losses are shown. The annual exempt amount is displayed and is not deducted.
+- Report pack is a printable page, or a PDF when the `pdf` extra is installed.
+- Koinly compares an uploaded capital gains summary and complete tax report with the desk. The uploads stay in the data directory.
+- Prices fills a missing GBP value from the calculator's price sources into a local cache. The uploaded file is not edited.
+- Plan shows the remaining annual exempt amount and a what-if sale. The sale is not saved. It is not advice.
+- Sync imports Ethereum transactions or a Kraken ledger, read only. The key stays in the data directory.
 
 ### Open it from your phone (Tailscale)
 

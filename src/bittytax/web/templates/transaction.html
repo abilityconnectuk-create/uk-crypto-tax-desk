@@ -31,8 +31,16 @@
                 <th>Status</th>
                 <td>{{ row.status }}</td>
             </tr>
+            {% if row.tag %}
+                <tr>
+                    <th>DeFi tag</th>
+                    <td>{{ row.tag }}</td>
+                </tr>
+            {% endif %}
         </tbody>
     </table>
+    <p class="banner">AWAITING TAX REVIEW. A DeFi tag is a note on the row. It does not change the calculator type.</p>
+    {% if row.tag_note %}<p>{{ row.tag_note }}</p>{% endif %}
     <form class="stack"
           method="post"
           action="/transactions/{{ row.import_id }}/{{ row.id.split(':')[1] }}">
@@ -41,6 +49,13 @@
         <select id="type" name="type" required>
             {% for kind in row.allowed_types %}
                 <option value="{{ kind }}" {% if kind == row.type %}selected{% endif %}>{{ kind }}</option>
+            {% endfor %}
+        </select>
+        <label for="tag">DeFi tag</label>
+        <select id="tag" name="tag">
+            <option value="">No DeFi tag</option>
+            {% for item in row.defi_tags %}
+                <option value="{{ item.id }}" {% if item.id == row.tag %}selected{% endif %}>{{ item.label }}</option>
             {% endfor %}
         </select>
         <label for="why">Why</label>
@@ -57,6 +72,7 @@
                     <th>From</th>
                     <th>To</th>
                     <th>Why</th>
+                    <th>Tag</th>
                 </tr>
             </thead>
             <tbody>
@@ -67,6 +83,7 @@
                         <td>{{ entry.before_type }}</td>
                         <td>{{ entry.after_type }}</td>
                         <td>{{ entry.why }}</td>
+                        <td>{{ entry.tag }}</td>
                     </tr>
                 {% endfor %}
             </tbody>

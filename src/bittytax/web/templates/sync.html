@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block body %}
+    <h1>Sync</h1>
+    <p class="lede">Read-only. An explorer key or an exchange key is written to the data directory on this computer, mode 0600, and is not shown again. Nothing is sent until you submit a form.</p>
+    <h2>Ethereum</h2>
+    <p>Normal transactions for one address, through the public explorer API. {% if secrets.etherscan %}A key is already stored.{% endif %}</p>
+    <form method="post" action="/sync/ethereum">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label for="address">Address</label>
+        <input id="address" name="address" autocomplete="off">
+        <label for="etherscan_key">Explorer API key</label>
+        <input id="etherscan_key" name="api_key" type="password" autocomplete="off">
+        <button type="submit">Import Ethereum</button>
+    </form>
+    <h2>Kraken</h2>
+    <p>Ledger history for an API key that can read the account. {% if secrets.kraken %}A key is already stored.{% endif %}</p>
+    <form method="post" action="/sync/kraken">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label for="kraken_key">API key</label>
+        <input id="kraken_key" name="api_key" type="password" autocomplete="off">
+        <label for="kraken_secret">API secret</label>
+        <input id="kraken_secret"
+               name="api_secret"
+               type="password"
+               autocomplete="off">
+        <button type="submit">Import Kraken</button>
+    </form>
+{% endblock %}
