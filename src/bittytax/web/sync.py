@@ -108,7 +108,7 @@ def import_kraken(
 
 
 def kraken_sign(path: str, nonce: str, body: str, secret: str) -> str:
-    """Kraken's HMAC-SHA512 of the path plus SHA256(nonce + POST body)."""
+    """HMAC signature for one Kraken private request."""
     digest = hashlib.sha256(f"{nonce}{body}".encode("utf-8")).digest()
     mac = hmac.new(base64.b64decode(secret), path.encode("utf-8") + digest, hashlib.sha512)
     return base64.b64encode(mac.digest()).decode("ascii")
