@@ -151,7 +151,19 @@ def _cover(
     lines.append(f"Gains before the split: {summary.get('gain_before', '')}")
     lines.append(f"Gains on or after the split: {summary.get('gain_after', '')}")
     lines.append(f"Split date: {summary.get('split_date', '') or 'none'}")
+    _cover_person(lines, desk)
     return "\n".join(lines) + "\n"
+
+
+def _cover_person(lines: List[str], desk: Any) -> None:
+    """Name and taxpayer reference from the local settings. Blank fields are omitted."""
+    from .desk_settings import load_settings  # pylint: disable=import-outside-toplevel
+
+    settings = load_settings(desk.root)
+    if settings.get("name"):
+        lines.append(f"Name: {settings['name']}")
+    if settings.get("utr"):
+        lines.append(f"UTR: {settings['utr']}")
 
 
 def _questions(tax_year: int, desk: Any) -> str:

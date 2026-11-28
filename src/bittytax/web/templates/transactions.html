@@ -213,7 +213,7 @@
                     <input name="method" value="{{ filters.method }}">
                 </label>
                 <label>
-                    Value source
+                    Net value source
                     <input name="value_source" value="{{ filters.value_source }}">
                 </label>
                 <label>
@@ -402,6 +402,7 @@
                             <span class="tx-side">
                                 {% if row.manual %}<span class="tag mark-m" aria-label="Manual">M</span>{% endif %}
                                 {% if row.note %}<span class="tag">{{ row.note }}</span>{% endif %}
+                                {% if row.value_source %}<span class="tag">{{ row.value_source }}</span>{% endif %}
                                 {% for label in row.warning_labels %}<span class="tag warn">{{ label }}</span>{% endfor %}
                                 <code class="chip">{{ row.id.split(":")[1] }}</code>
                             </span>

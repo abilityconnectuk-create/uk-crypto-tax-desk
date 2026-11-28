@@ -2,6 +2,12 @@
 {% block body %}
     <h1>Koinly check</h1>
     <p class="lede">Upload Koinly's capital gains summary and the complete tax report for one year. The files stay in the data directory on this computer. The numbers below are a comparison, not a filing position.</p>
+    {% if conversion_label %}
+        <p>{{ conversion_label }}. Each amount uses the sterling rate on its own date. The desk base currency is GBP and the Koinly file is USD.</p>
+    {% endif %}
+    {% if other_gains is defined and other_gains.shown == "yes" %}
+        <p>{{ other_gains.note }} Amount {{ other_gains.amount }}. SA108: {{ other_gains.in_sa108 }}.</p>
+    {% endif %}
     <form method="post" action="/koinly" enctype="multipart/form-data">
         <input type="hidden" name="csrf" value="{{ csrf }}">
         <label for="tax_year">Tax year</label>

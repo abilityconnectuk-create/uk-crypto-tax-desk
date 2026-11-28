@@ -20,8 +20,10 @@ from openpyxl import Workbook, load_workbook
 from ..config import config
 from ..conv.txref import hash_kind
 from . import tx_store
+from .desk_settings import refuse_if_locked
 from .errors import DeskError
 from .events import append_event
+from .prices import load_price_warnings
 from .tag_set import BANNER, catalogue, default_for, describe
 from .taxyear import tax_year_containing
 
@@ -45,6 +47,7 @@ _WARNINGS = (
     ("missing_price", "Missing price"),
     ("missing_acquisition_cost", "Missing acquisition cost"),
     ("missing_cost_basis", "Missing cost basis"),
+    ("unreliable_price", "No reliable price"),
 )
 _WARNING_LABELS = dict(_WARNINGS)
 _ACQUIRE = {
@@ -204,7 +207,12 @@ def build_page(
     filters = read_filters(query)
     page = _page_number(_first(query, "page"))
     per_page = _per_page(_first(query, "per"))
-    prepared = prepare(desk.all_rows(), tx_store.load_dust(desk.root), filters["clock"])
+    prepared = prepare(
+        desk.all_rows(),
+        tx_store.load_dust(desk.root),
+        filters["clock"],
+        load_price_warnings(desk.root),
+    )
     matched = [row for row in prepared if row_matches(row, filters)]
     ordered = _sort(matched, filters["sort"])
     start = (page - 1) * per_page
@@ -230,10 +238,15 @@ def build_page(
     }
 
 
-def prepare(rows: Sequence[Mapping[str, Any]], dust: Decimal, clock: str) -> List[Dict[str, Any]]:
+def prepare(
+    rows: Sequence[Mapping[str, Any]],
+    dust: Decimal,
+    clock: str,
+    price_warnings: Optional[Mapping[str, str]] = None,
+) -> List[Dict[str, Any]]:
     """Copies of the rows with warnings, dates, and explorer links."""
     copied = [dict(row) for row in rows]
-    _attach_warnings(copied, dust)
+    _attach_warnings(copied, dust, price_warnings or {})
     for row in copied:
         row["filter_date"] = zoned_date(str(row.get("timestamp") or ""), clock)
         row["tx_class"] = classify(row)
@@ -247,7 +260,12 @@ def prepare(rows: Sequence[Mapping[str, Any]], dust: Decimal, clock: str) -> Lis
 
 def warning_total(desk: Any, year: int) -> int:
     """Rows in the tax year that still show a warning after the dust threshold."""
-    rows = prepare(desk.all_rows(), tx_store.load_dust(desk.root), "utc")
+    rows = prepare(
+        desk.all_rows(),
+        tx_store.load_dust(desk.root),
+        "utc",
+        load_price_warnings(desk.root),
+    )
     return sum(1 for row in rows if row["warnings"] and _in_year(str(row.get("date") or ""), year))
 
 
@@ -381,7 +399,11 @@ def open_row(desk: Any, row_id: str) -> Dict[str, Any]:
     """One row for the editor, including the tag banner and the value log."""
     base = desk.transaction(row_id)
     dust = tx_store.load_dust(desk.root)
-    prepared = next(row for row in prepare(desk.all_rows(), dust, "utc") if row["id"] == row_id)
+    prepared = next(
+        row
+        for row in prepare(desk.all_rows(), dust, "utc", load_price_warnings(desk.root))
+        if row["id"] == row_id
+    )
     prepared["log"] = base.get("log") or []
     prepared["allowed_types"] = base.get("allowed_types") or []
     prepared["defi_tags"] = base.get("defi_tags") or []
@@ -404,6 +426,7 @@ def open_row(desk: Any, row_id: str) -> Dict[str, Any]:
 def save_row(desk: Any, row_id: str, form: Mapping[str, str], who: str) -> None:
     """Set the tag, the reviewed mark, and the GBP override."""
     current = open_row(desk, row_id)
+    refuse_if_locked(desk.root, str(current.get("timestamp") or ""))
     tag = form.get("tag", "")
     if tag and tag not in {item["id"] for item in _tag_choices()}:
         raise DeskError("Choose a tag from the list.")
@@ -435,6 +458,8 @@ def save_row(desk: Any, row_id: str, form: Mapping[str, str], who: str) -> None:
 def set_gbp(desk: Any, row_id: str, raw: str, who: str) -> None:
     """Blank means the market value. Each change is an audit line."""
     row = next((item for item in desk.all_rows() if item["id"] == row_id), None)
+    if row is not None:
+        refuse_if_locked(desk.root, str(row.get("timestamp") or ""))
     if row is None:
         raise DeskError("That transaction is not in the ledger.")
     new = _gbp(raw)
@@ -496,12 +521,18 @@ def selected_ids(
     """Ticked rows, or every row that matches the current filters."""
     if _first(form, "scope") == "filtered":
         filters = read_filters(query)
-        prepared = prepare(desk.all_rows(), tx_store.load_dust(desk.root), filters["clock"])
+        prepared = prepare(
+            desk.all_rows(),
+            tx_store.load_dust(desk.root),
+            filters["clock"],
+            load_price_warnings(desk.root),
+        )
         return [str(row["id"]) for row in prepared if row_matches(row, filters)]
     return [str(item) for item in form.get("row_id", []) if str(item)]
 
 
 def soft_delete(desk: Any, row_ids: Sequence[str], who: str) -> None:
+    _refuse_ids(desk, row_ids)
     for row_id in row_ids:
         tx_store.update_meta(desk.root, row_id, {"deleted": "yes"})
         _audit(desk, row_id, "deleted", "no", "yes", who)
@@ -512,6 +543,7 @@ def soft_delete(desk: Any, row_ids: Sequence[str], who: str) -> None:
 
 
 def restore_rows(desk: Any, row_ids: Sequence[str], who: str) -> None:
+    _refuse_ids(desk, row_ids)
     for row_id in row_ids:
         tx_store.update_meta(desk.root, row_id, {"deleted": "no"})
         _audit(desk, row_id, "deleted", "yes", "no", who)
@@ -680,13 +712,25 @@ def value_fields(row: Mapping[str, Any]) -> List[str]:
     return fields
 
 
-def _attach_warnings(rows: List[Dict[str, Any]], dust: Decimal) -> None:
+def _refuse_ids(desk: Any, row_ids: Sequence[str]) -> None:
+    rows = {str(row["id"]): row for row in desk.all_rows()}
+    for row_id in row_ids:
+        row = rows.get(row_id)
+        if row is not None:
+            refuse_if_locked(desk.root, str(row.get("timestamp") or ""))
+
+
+def _attach_warnings(
+    rows: List[Dict[str, Any]], dust: Decimal, price_warnings: Mapping[str, str]
+) -> None:
     ordered = sorted(rows, key=lambda row: str(row.get("timestamp") or ""))
     pools: Dict[str, Dict[str, Decimal]] = {}
     for row in ordered:
         codes: List[str] = []
         if not row.get("deleted") and not _spam_row(row):
             codes.extend(_price_warnings(row))
+            if str(row.get("id") or "") in price_warnings:
+                codes.append("unreliable_price")
             codes.extend(_disposal_warnings(row, pools))
             _remember_acquisition(row, pools)
         if _dusty(row, dust):

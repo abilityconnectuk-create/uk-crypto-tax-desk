@@ -67,7 +67,26 @@ def missing_page(desk: Any, year: int) -> Dict[str, Any]:
 
 
 def koinly_page(desk: Any, year: int) -> Dict[str, Any]:
+    from .desk_settings import (  # pylint: disable=import-outside-toplevel
+        convert_dated_amounts,
+        load_settings,
+        other_gains_display,
+        usd_gbp_rates,
+    )
+
     summary, complete = load_uploads(desk.root, year)
+    settings = load_settings(desk.root)
+    label = ""
+    if settings["base_currency"] == "GBP" and settings["koinly_currency"] == "USD":
+        rates = usd_gbp_rates(desk.root)
+        converted, count = convert_dated_amounts(complete, rates)
+        if count:
+            complete = converted
+            label = "USD converted to GBP"
+        converted_summary, summary_count = convert_dated_amounts(summary, rates)
+        if summary_count:
+            summary = converted_summary
+            label = "USD converted to GBP"
     tolerance = load_tolerance(desk.root)
     try:
         report = _report(desk, year)
@@ -83,6 +102,10 @@ def koinly_page(desk: Any, year: int) -> Dict[str, Any]:
     bits["definition"] = definition
     bits["tolerance"] = f"{tolerance}"
     bits["overrides"] = len(desk.change_log())
+    bits["conversion_label"] = label
+    bits["other_gains"] = other_gains_display(
+        desk.all_rows(), bool(settings["other_gains_as_capital"])
+    )
     return bits
 
 
