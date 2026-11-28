@@ -75,11 +75,12 @@ def load_threshold(root: Path) -> Decimal:
 
 
 def save_threshold(root: Path, raw: str) -> Decimal:
-    """Store the threshold. The file is written in binary mode."""
+    """Store the threshold. Binary mode keeps the newline byte on Windows."""
     amount = _threshold(raw)
     path = root / "ready-threshold.json"
     payload = json.dumps({"threshold": f"{amount.quantize(_PENCE)}"}) + "\n"
-    descriptor = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0)
+    descriptor = os.open(str(path), flags, 0o600)
     try:
         os.write(descriptor, payload.encode("utf-8"))
     finally:
