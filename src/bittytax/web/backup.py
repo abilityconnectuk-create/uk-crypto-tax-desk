@@ -19,6 +19,7 @@ from .events import append_event
 
 _MAGIC = b"BTBK1"
 _SKIP = {"backups", "backup.key"}
+_BINARY = getattr(os, "O_BINARY", 0)
 
 
 def backup_now(root: Path, reason: str, who: str = "local") -> Path:
@@ -150,8 +151,8 @@ def _create_archive(folder: Path, stamp: str, payload: bytes) -> Path:
 
 
 def _write_private(path: Path, payload: bytes) -> None:
-    """Create a new file at mode 0600. ``write_bytes`` then ``chmod`` stays open on Windows."""
-    descriptor = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    """Create a new file at mode 0600. Binary mode keeps the ciphertext intact on Windows."""
+    descriptor = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, 0o600)
     try:
         view = memoryview(payload)
         while view:
@@ -171,14 +172,16 @@ def _key(root: Path) -> bytes:
             env.encode("utf-8"), salt=b"uk-crypto-tax-desk-backup", n=2**14, r=8, p=1, dklen=32
         )
     path = root / "backup.key"
-    if not path.is_file():
-        descriptor = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        try:
-            os.write(descriptor, os.urandom(32))
-        finally:
-            os.close(descriptor)
-        os.chmod(path, 0o600)
-    return path.read_bytes()
+    if path.is_file():
+        return path.read_bytes()
+    secret = os.urandom(32)
+    descriptor = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, 0o600)
+    try:
+        os.write(descriptor, secret)
+    finally:
+        os.close(descriptor)
+    os.chmod(path, 0o600)
+    return secret
 
 
 def _retention(root: Path) -> int:
