@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block body %}
+    <h1>Data health</h1>
+    <p class="lede">Fix these before you rely on a report. Each row links to the transaction when the desk can match one. This list does not change a tax rule.</p>
+    <form method="get" action="/health">
+        <label for="tax_year">Tax year for missing cost</label>
+        <select id="tax_year" name="tax_year">
+            {% for item in years %}
+                <option value="{{ item.year }}"
+                        {% if item.year == tax_year %}selected{% endif %}>{{ item.label }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit">Show</button>
+    </form>
+    {% if health.calculator_note %}
+        <p class="warn">{{ health.calculator_note }}</p>
+    {% endif %}
+    <p>
+        <strong>{{ health.total }}</strong> to fix.
+        Missing cost {{ health.counts.get('missing-cost', 0) }},
+        unmatched transfers {{ health.counts.get('unmatched-transfer', 0) }},
+        likely duplicates {{ health.counts.get('duplicate', 0) }},
+        missing prices {{ health.counts.get('missing-price', 0) }},
+        negative balances {{ health.counts.get('negative-balance', 0) }}.
+    </p>
+    {% if health.issues %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Check</th>
+                    <th>What to fix</th>
+                    <th>Detail</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for issue in health.issues %}
+                    <tr>
+                        <td>{{ issue.category }}</td>
+                        <td>
+                            {% if issue.href %}
+                                <a href="{{ issue.href }}">{{ issue.summary }}</a>
+                            {% else %}
+                                {{ issue.summary }}
+                            {% endif %}
+                        </td>
+                        <td>{{ issue.detail }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p class="note">Nothing in this list for the selected year.</p>
+    {% endif %}
+    {% if accountant_review %}
+        <h2>Accountant review</h2>
+        <p class="banner">AWAITING TAX REVIEW. These items are recorded for the accountant. The desk does not apply them.</p>
+        <ul>
+            {% for item in accountant_review %}
+                <li>
+                    <strong>{{ item.title }}</strong>
+                    — {{ item.detail }}
+                    {% if item.manual %}
+                        ({{ item.manual }})
+                    {% endif %}
+                </li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+{% endblock %}

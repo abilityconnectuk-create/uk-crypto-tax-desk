@@ -37,6 +37,18 @@ a { color: var(--green); }
 nav { display: flex; flex-wrap: wrap; gap: 0.75rem 1.1rem; }
 nav a { color: var(--green); text-decoration: none; }
 nav a[aria-current="page"] { color: var(--copper); border-bottom: 2px solid var(--copper); }
+.badge {
+  display: inline-block;
+  min-width: 1.1rem;
+  margin-left: 0.2rem;
+  padding: 0 0.35rem;
+  border-radius: 1rem;
+  background: var(--copper);
+  color: #fffaf3;
+  font-size: 0.75rem;
+  line-height: 1.3rem;
+  text-align: center;
+}
 .who { margin: 0 0 0 auto; font-size: 0.92rem; }
 form.signout { margin: 0; }
 form.signout button { background: transparent; color: var(--green); padding: 0; }
@@ -99,6 +111,15 @@ button {
 .note, .warn { padding: 0.6rem 0.8rem; }
 .note { background: var(--green-soft); }
 .warn { background: var(--warn-bg); color: var(--warn); }
+tr.diff td { background: var(--warn-bg); }
+.banner {
+  border: 2px solid var(--copper);
+  background: var(--warn-bg);
+  color: var(--warn);
+  padding: 0.8rem 1rem;
+  margin: 1rem 0;
+}
+.chart { margin: 1rem 0; overflow-x: auto; }
 pre {
   white-space: pre-wrap;
   background: var(--card);

@@ -28,6 +28,7 @@ from .convert import (
 )
 from .engine_run import report_csv, run_tax_year
 from .errors import DeskError
+from .health import analyse
 
 PAGE_SIZE = 50
 _SPECIAL = {NEEDS_REVIEW, POSSIBLE_SPAM, IGNORED}
@@ -233,6 +234,24 @@ class Desk:
     def report_csv(self, tax_year: int) -> str:
         return report_csv(self.report(tax_year))
 
+    def health(self, tax_year: int) -> Dict[str, Any]:
+        """Ledger problems for one tax year. A calculator failure does not hide the others."""
+        rows = self._effective_rows()
+        missing: List[Dict[str, str]] = []
+        note = ""
+        if rows:
+            try:
+                missing = list(self.report(tax_year).get("missing_cost", []))
+            except DeskError as exc:
+                note = str(exc)
+        packed = analyse(rows, self.review_lists(), missing)
+        packed["calculator_note"] = note
+        packed["tax_year"] = tax_year
+        return packed
+
+    def health_count(self, tax_year: int) -> int:
+        return int(self.health(tax_year)["total"])
+
     def counts(self) -> Dict[str, int]:
         review = self.review_lists()
         rows = self._effective_rows()
@@ -302,6 +321,9 @@ def _present(row_id: str, import_id: str, cells: Sequence[str], changed: bool) -
         "sell_quantity": cells[4],
         "sell_asset": cells[5],
         "sell_value": cells[6],
+        "fee_quantity": cells[7],
+        "fee_asset": cells[8],
+        "fee_value": cells[9],
         "wallet": cells[10],
         "timestamp": cells[11],
         "date": cells[11][:10],

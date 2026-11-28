@@ -207,6 +207,7 @@ def _handler_for(desk: Desk, desk_auth: DeskAuth, bind_host: str) -> type:
                 ("POST", "/import"): self._import_post,
                 ("GET", "/transactions"): lambda: self._transactions(query),
                 ("GET", "/review"): lambda: self._review(query),
+                ("GET", "/health"): lambda: self._health(query),
                 ("GET", "/report"): lambda: self._report(query),
                 ("GET", "/report.csv"): lambda: self._report_csv(query),
                 ("GET", "/config"): self._config,
@@ -314,6 +315,18 @@ def _handler_for(desk: Desk, desk_auth: DeskAuth, bind_host: str) -> type:
             self._remember(desk_auth.new_session())
             self._redirect("/")
 
+        def _health(self, query: Mapping[str, List[str]]) -> None:
+            year = _year(_field(query, "tax_year"))
+            self._page(
+                "health.html",
+                "Health",
+                section="health",
+                health=desk.health(year),
+                years=supported_years(),
+                tax_year=year,
+                accountant_review=[],
+            )
+
         def _review(self, query: Mapping[str, List[str]]) -> None:
             year = _year(_field(query, "tax_year"))
             self._page(
@@ -372,6 +385,8 @@ def _handler_for(desk: Desk, desk_auth: DeskAuth, bind_host: str) -> type:
             context.setdefault("csrf", self._req.session.csrf)
             context.setdefault("signed_in", bool(self._req.session.user))
             context.setdefault("actor", self._req.session.user)
+            context.setdefault("health_count", desk.health_count(DEFAULT_TAX_YEAR))
+            context.setdefault("accountant_review", [])
 
         def _static(self, path: str) -> None:
             name = path[len("/static/") :]

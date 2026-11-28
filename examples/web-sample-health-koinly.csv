@@ -1,0 +1,5 @@
+Date,Type,Tag,Sending Wallet,Sent Amount,Sent Currency,Sent Cost Basis,Receiving Wallet,Received Amount,Received Currency,Received Cost Basis,Fee Amount,Fee Currency,Gain (GBP),Net Value (GBP),Fee Value (GBP),TxSrc,TxDest,TxHash,Description
+2025-05-01 12:00:00,crypto_deposit,,,,,,Sample Wallet,1,DOGE,,,,,,,,,sample-dup-1,duplicate one
+2025-05-01 12:00:00,crypto_deposit,,,,,,Sample Wallet,1,DOGE,,,,,,,,,sample-dup-2,duplicate two
+2025-05-02 12:00:00,crypto_deposit,,,,,,Sample Wallet,2,PEPE,,,,,,,,,sample-missing-price,no gbp value
+2025-05-03 12:00:00,exchange,,Sample Wallet,5,DOGE,,Sample Wallet,10,GBP,,,,,10,,,,sample-oversell,sell more than held
