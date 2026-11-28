@@ -12,13 +12,18 @@ from .rules import load_sa108
 _BANNER = "AWAITING TAX REVIEW"
 
 
-def sa108_view(report: Mapping[str, Any], ending_year: int) -> Optional[Dict[str, Any]]:
+def sa108_view(
+    report: Mapping[str, Any],
+    ending_year: int,
+    losses: Optional[Mapping[str, str]] = None,
+) -> Optional[Dict[str, Any]]:
     """Boxes for one report. ``None`` when that year has no mapping file."""
     spec = load_sa108(ending_year)
     if spec is None:
         return None
     summary = report.get("summary") or {}
     boxes = [_box(item, summary) for item in spec.get("boxes", []) if isinstance(item, dict)]
+    _fill_loss_boxes(boxes, losses or {})
     allowance = spec.get("annual_exempt_amount") or {}
     trigger = _trigger(spec.get("reporting_trigger") or {}, summary)
     return {
@@ -39,6 +44,14 @@ def sa108_view(report: Mapping[str, Any], ending_year: int) -> Optional[Dict[str
         "trigger": trigger,
         "split": _split(spec.get("split") or {}, summary, report.get("disposals") or []),
     }
+
+
+def _fill_loss_boxes(boxes: List[Dict[str, str]], losses: Mapping[str, str]) -> None:
+    for box in boxes:
+        if box["box"] == "45" and losses.get("brought_used"):
+            box["value"] = str(losses["brought_used"])
+        if box["box"] == "47" and losses.get("carried"):
+            box["value"] = str(losses["carried"])
 
 
 def _box(item: Mapping[str, Any], summary: Mapping[str, Any]) -> Dict[str, str]:

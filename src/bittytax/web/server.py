@@ -43,6 +43,7 @@ from .glossary import GLOSSARY
 from .identity import LOOPBACK, actor_for, trusted_tailscale_user
 from .import_inspect import find_problem, load_problems
 from .koinly_check import compare_year, load_uploads, store_uploads
+from .losses import for_year, save_opening, schedule
 from .matching import apply_auto_matches, decide, match_view, save_settings
 from .pack import pack_context, pack_lines, render_pdf
 from .planning import hypothetical, plan_view
@@ -268,6 +269,8 @@ def _handler_for(  # pylint: disable=too-many-statements
                 ("GET", "/matches"): self._matches,
                 ("GET", "/cost"): self._cost,
                 ("GET", "/defi"): lambda: self._defi(query),
+                ("GET", "/losses"): lambda: self._losses(query),
+                ("POST", "/losses"): self._losses_save,
                 ("POST", "/matches/run"): self._matches_run,
                 ("POST", "/matches/decide"): self._matches_decide,
                 ("POST", "/matches/settings"): self._matches_settings,
@@ -610,7 +613,7 @@ def _handler_for(  # pylint: disable=too-many-statements
                 "Tax reports",
                 section="report",
                 report=report,
-                sa108=sa108_view(report, year) if report else None,
+                sa108=sa108_view(report, year, for_year(desk, year)) if report else None,
                 years=supported_years(),
                 tax_year=year,
                 year_label=label,
@@ -695,6 +698,33 @@ def _handler_for(  # pylint: disable=too-many-statements
 
         def _matches(self) -> None:
             self._page("matches.html", "Matches", section="matches", view=match_view(desk))
+
+        def _losses(self, query: Mapping[str, List[str]]) -> None:
+            from .losses import load_opening  # pylint: disable=import-outside-toplevel
+
+            self._page(
+                "losses.html",
+                "Losses",
+                section="losses",
+                view={"rows": schedule(desk), "opening": load_opening(desk.root)},
+                error=_field(query, "error"),
+            )
+
+        def _losses_save(self) -> None:
+            form = self._req.form
+            try:
+                save_opening(desk.root, form.get("year", ""), form.get("amount", ""))
+            except DeskError as exc:
+                self._redirect("/losses?error=" + quote(str(exc)))
+                return
+            append_event(
+                desk.root,
+                "losses",
+                self._actor(),
+                "Opening losses were saved.",
+                {"year": form.get("year", "")},
+            )
+            self._redirect("/losses")
 
         def _defi(self, query: Mapping[str, List[str]]) -> None:
             year = _year(_field(query, "tax_year"))

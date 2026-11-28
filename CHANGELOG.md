@@ -9,6 +9,7 @@ The price data cache format has been updated to correctly distinguish assets tha
 The new `price_via_btc` config option may not exist in your config file. If it is missing, BittyTax keeps the legacy BTC-intermediate behaviour for backward compatibility. Add `price_via_btc: False` to your config if you want historic prices to use direct local currency lookups.
 
 ### Added
+- Local web desk: losses for each tax year use this year's losses first. Brought-forward losses reduce gains only down to the annual exempt amount from the rule file. SA108 boxes 45 and 47 are filled from that and stay AWAITING TAX REVIEW. An opening figure from before the first year is stored in the data directory.
 - Local web desk: a DeFi tag is sent to the calculator only when that tag's rule-file entry has `confirmed: true`. Every current entry is `confirmed: false`, so the figures stay the same. DeFi shows what would change if one tag were confirmed. That preview is AWAITING TAX REVIEW.
 - Local web desk: read-only imports for Solana (public JSON-RPC), Base and other EVM chains (an Etherscan-family explorer, including a custom chain by URL and chain id), KuCoin deposits, Coinbase Advanced Trade fills, and a Revolut CSV. Network tests use stand-ins. Keys stay in the data directory.
 - Local web desk: a Koinly full export is labelled from `config/koinly_labels.yaml`. Listed labels such as staking, airdrop, lending interest, cost, gift, lost, an internal transfer, and a swap set a BittyTax type and, where the table says so, a DeFi tag. A label that is not in the table stays for review.
