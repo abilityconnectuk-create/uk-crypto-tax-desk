@@ -40,6 +40,7 @@ from .prices import fetch_missing, load_misses, missing_slots
 from .rules import accountant_review_items
 from .sa108 import sa108_view
 from .store import Desk
+from .sync import import_ethereum, import_kraken, secrets_present
 
 _STATIC = Path(__file__).resolve().parent / "static"
 _ROW_PATH = re.compile(r"^/transactions/([0-9A-Za-zT-]+)/([0-9]+)$")
@@ -224,6 +225,9 @@ def _handler_for(  # pylint: disable=too-many-statements
                 ("POST", "/koinly"): self._koinly_post,
                 ("GET", "/prices"): self._prices,
                 ("POST", "/prices/fetch"): self._prices_fetch,
+                ("GET", "/sync"): self._sync,
+                ("POST", "/sync/ethereum"): self._sync_ethereum,
+                ("POST", "/sync/kraken"): self._sync_kraken,
                 ("GET", "/config"): self._config,
                 ("GET", "/about"): self._about,
             }
@@ -421,6 +425,21 @@ def _handler_for(  # pylint: disable=too-many-statements
         def _prices_fetch(self) -> None:
             fetch_missing(desk)
             self._redirect("/prices")
+
+        def _sync(self) -> None:
+            self._page("sync.html", "Sync", section="sync", secrets=secrets_present(desk))
+
+        def _sync_ethereum(self) -> None:
+            import_ethereum(
+                desk, self._req.form.get("address", ""), self._req.form.get("api_key", "")
+            )
+            self._redirect("/transactions?imported=ethereum")
+
+        def _sync_kraken(self) -> None:
+            import_kraken(
+                desk, self._req.form.get("api_key", ""), self._req.form.get("api_secret", "")
+            )
+            self._redirect("/transactions?imported=kraken")
 
         def _report_csv(self, query: Mapping[str, List[str]]) -> None:
             year = _year(_field(query, "tax_year"))
