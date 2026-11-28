@@ -151,7 +151,7 @@ def _create_archive(folder: Path, stamp: str, payload: bytes) -> Path:
 
 
 def _write_private(path: Path, payload: bytes) -> None:
-    """Create a new file at mode 0600. Binary mode keeps the ciphertext intact on Windows."""
+    """Create a private binary file at mode 0600 so Windows does not rewrite newlines."""
     descriptor = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, 0o600)
     try:
         view = memoryview(payload)
