@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 from decimal import Decimal
 from pathlib import Path
+from typing import Any, Dict
 
 from bittytax.web.losses import allocate, for_year, save_opening
 from bittytax.web.sa108 import sa108_view
@@ -30,7 +31,7 @@ def test_opening_losses_fill_boxes_45_and_47(tmp_path: Path) -> None:
     assert row["brought_used"] == "0.00"
     assert row["carried"] == "4000.00"
     assert row["banner"] == "AWAITING TAX REVIEW"
-    report = {"summary": {}, "disposals": []}
+    report: Dict[str, Any] = {"summary": {}, "disposals": []}
     view = sa108_view(report, 2026, row)
     assert view is not None
     boxes = {item["box"]: item for item in view["boxes"]}

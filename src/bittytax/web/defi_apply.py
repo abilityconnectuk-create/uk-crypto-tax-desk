@@ -11,9 +11,9 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from .dashboard import tax_year_containing
 from .engine_run import run_tax_year
 from .rules import load_rules
+from .taxyear import tax_year_containing
 
 _BANNER = "AWAITING TAX REVIEW"
 _TRANSFER = "transfer"
