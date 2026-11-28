@@ -50,6 +50,9 @@ from .defi_apply import pending_preview
 from .engine_run import supported_years
 from .errors import DeskError
 from .events import append_event
+from .exchange_csv import accept_row, held_upload
+from .exchange_csv import review_items as exchange_review
+from .exchange_csv import show_comparison, staged_location
 from .filing import items_csv, readiness, save_threshold
 from .futures import save_toggle
 from .glossary import GLOSSARY
@@ -282,6 +285,9 @@ def _handler_for(  # pylint: disable=too-many-statements
                 ("GET", "/import/problems"): self._import_problems,
                 ("POST", "/import/detect"): self._import_detect,
                 ("POST", "/import"): self._import_post,
+                ("POST", "/import/exchange"): self._exchange_post,
+                ("GET", "/exchanges"): lambda: self._exchanges(query),
+                ("POST", "/review/exchange"): self._exchange_accept,
                 ("GET", "/transactions"): lambda: self._transactions(query),
                 ("POST", "/transactions/bulk"): self._bulk,
                 ("GET", "/rules"): lambda: self._rules(query),
@@ -407,7 +413,7 @@ def _handler_for(  # pylint: disable=too-many-statements
             dismiss_year_end(desk.root, date.today())
             self._redirect("/")
 
-        def _import_form(self) -> None:
+        def _import_form(self, error: str = "") -> None:
             query = parse_qs(urlparse(self.path).query)
             chosen = _field(query, "imported")
             summary = None
@@ -427,7 +433,7 @@ def _handler_for(  # pylint: disable=too-many-statements
                 section="import",
                 summary=summary,
                 wallets=wallets,
-                error="",
+                error=error,
                 problems=load_problems(desk.root),
             )
 
@@ -458,17 +464,16 @@ def _handler_for(  # pylint: disable=too-many-statements
 
         def _import_detect(self) -> None:
             filename, payload = _uploaded_file(self.headers.get("Content-Type", ""), self._req.raw)
-            found = detect_upload(filename, payload)
+            found = held_upload(filename, payload) or detect_upload(filename, payload)
             self._send(200, json.dumps(found).encode("utf-8"), "application/json")
 
         def _import_post(self) -> None:
             filename, payload = _uploaded_file(self.headers.get("Content-Type", ""), self._req.raw)
-            actor = actor_for(
-                self.headers,
-                self._req.client,
-                host=self._req.host_name,
-                session_user=self._req.session.user,
-            )
+            location, _error = staged_location(desk, filename, payload, self._actor())
+            if location:
+                self._redirect(location)
+                return
+            actor = self._actor()
             try:
                 entry = desk.import_known(filename, payload, actor)
             except DeskError as exc:
@@ -592,12 +597,7 @@ def _handler_for(  # pylint: disable=too-many-statements
         def _reclassify(self, row_id: str) -> None:
             form = self._req.form
             try:
-                actor = actor_for(
-                    self.headers,
-                    self._req.client,
-                    host=self._req.host_name,
-                    session_user=self._req.session.user,
-                )
+                actor = self._actor()
                 desk.reclassify(
                     row_id,
                     _form_value(form, "type"),
@@ -666,14 +666,37 @@ def _handler_for(  # pylint: disable=too-many-statements
 
         def _review(self, query: Mapping[str, List[str]]) -> None:
             year = _year(_field(query, "tax_year"))
+            review = desk.review(year)
+            review["queue"] = exchange_review(desk, year) + list(review.get("queue") or [])
             self._page(
                 "review.html",
                 "Review",
                 section="review",
-                review=desk.review(year),
+                review=review,
+                types=allowed_types(),
                 years=supported_years(),
                 tax_year=year,
             )
+
+        def _exchanges(self, query: Mapping[str, List[str]]) -> None:
+            year = _year(_field(query, "tax_year"))
+            show_comparison(
+                self, desk, year, _field(query, "exchange"), _field(query, "again") == "1"
+            )
+
+        def _exchange_post(self) -> None:
+            filename, payload = _uploaded_file(self.headers.get("Content-Type", ""), self._req.raw)
+            location, error = staged_location(desk, filename, payload, self._actor())
+            if error:
+                self._import_form(error)
+                return
+            self._redirect(location)
+
+        def _exchange_accept(self) -> None:
+            form = self._req.form
+            year = _year(_form_value(form, "tax_year"))
+            accept_row(desk, _form_value(form, "row_id"), self._actor(), form)
+            self._redirect(f"/review?tax_year={year}")
 
         def _report(self, query: Mapping[str, List[str]]) -> None:
             year = _year(_field(query, "tax_year"))
@@ -1260,6 +1283,7 @@ def _year_action(path: str) -> str:
         "/health",
         "/review",
         "/koinly",
+        "/exchanges",
         "/plan",
         "/ready",
         "/ready/print",
@@ -1276,7 +1300,7 @@ def _year_action(path: str) -> str:
 
 def _year_keep(query: Mapping[str, List[str]]) -> List[Dict[str, str]]:
     kept = []
-    for key in ("range", "run", "hq", "hsort", "hdir"):
+    for key in ("range", "run", "hq", "hsort", "hdir", "exchange"):
         value = _field(query, key)
         if value:
             kept.append({"key": key, "value": value})

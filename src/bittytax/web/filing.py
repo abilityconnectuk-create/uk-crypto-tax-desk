@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from ..config import config
 from .allocation_desk import claim_codes, links, list_lots, negligible_claims
 from .errors import DeskError
+from .exchange_csv import open_gaps
 from .income_schedule import build_schedule
 from .koinly_check import load_uploads
 from .koinly_reconcile import koinly_metrics
@@ -45,6 +46,7 @@ CATEGORIES: Tuple[Tuple[str, str], ...] = (
     ("accountant_review", "Accountant review"),
     ("unconfirmed_rule", "Unconfirmed rules"),
     ("koinly_difference", "Koinly differences"),
+    ("exchange_gap", "Exchange gaps"),
     ("loss_deadline", "Loss deadlines"),
     ("awaiting_decision", "Awaiting decision"),
     ("accepted_gap", "Accepted gaps"),
@@ -108,6 +110,7 @@ def readiness(
     found.extend(review_items(rows, rules, _lots(desk), year))
     found.extend(unconfirmed_items(rules, sa108, slug_for(year)))
     found.extend(koinly_differences(boxes, income, koinly, band, year))
+    found.extend(exchange_gap_items(desk, year))
     found.extend(loss_items(loss_rows, year))
     found.extend(decision_items(negligible_claims(desk.root), _lots(desk), year))
     found.extend(accepted_gap_items(_spec_boxes(sa108), gaps(desk.root), year))
@@ -249,6 +252,14 @@ def unconfirmed_items(
                 True,
             )
         )
+    return found
+
+
+def exchange_gap_items(desk: Any, year: int) -> List[Dict[str, str]]:
+    """Exchange rows that do not agree with the imported Koinly file."""
+    found = []
+    for gap in open_gaps(desk, year):
+        found.append(_item("exchange_gap", gap["name"], gap["detail"], gap["href"], True))
     return found
 
 

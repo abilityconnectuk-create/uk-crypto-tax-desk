@@ -63,6 +63,11 @@
                         {{ ui.icon("check") }}
                         <span class="nav-label">Koinly check</span>
                     </a>
+                    <a href="/exchanges"
+                       {% if section == "exchanges" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("check") }}
+                        <span class="nav-label">Exchange check</span>
+                    </a>
                     <a href="/config"
                        {% if section == "config" %}aria-current="page"{% endif %}>
                         {{ ui.icon("settings") }}

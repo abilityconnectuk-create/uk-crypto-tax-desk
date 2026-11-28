@@ -9,6 +9,37 @@
         </div>
         <a class="btn primary" href="/import/add">+ Add</a>
     </div>
+    {% if error %}<p class="warn">{{ error }}</p>{% endif %}
+    <section class="card pad">
+        <h2>Exchange records</h2>
+        <p>
+            Drop a Coinbase statement, a KuCoin spot, deposit or withdrawal export, or a Revolut X statement.
+            The file is compared with Koinly for that exchange.
+            It is not added to the tax report until you accept it on Review.
+            Nothing is written to Koinly.
+        </p>
+        <form id="exchange-form"
+              method="post"
+              action="/import/exchange"
+              enctype="multipart/form-data">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <label class="drop" id="exchange-drop">
+                <span class="spinner"></span>
+                <strong>Drop a Coinbase, KuCoin or Revolut X CSV here</strong>
+                <span>or browse. The original file is kept on this computer.</span>
+                <input id="exchange-file"
+                       name="file"
+                       type="file"
+                       accept=".csv,.xlsx,text/csv"
+                       required>
+            </label>
+            <p id="exchange-detected" class="fine" aria-live="polite"></p>
+            <button type="submit" class="primary">Check against Koinly</button>
+        </form>
+        <p>
+            <a href="/exchanges?tax_year={{ tax_year }}">Open the exchange check</a>
+        </p>
+    </section>
     {% if summary %}
         <section class="card pad">
             <ol class="progress" aria-label="Import progress">
@@ -88,7 +119,6 @@
             {% endif %}
         </section>
     {% endif %}
-    {% if error %}<p class="warn">{{ error }}</p>{% endif %}
     {% if problems %}
         <p>
             <a href="/import/problems">Parser problems ({{ problems|length }})</a>

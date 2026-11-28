@@ -129,6 +129,7 @@
 
     wirePanel();
     wireImport();
+    wireExchange();
     wireParsers();
   });
 
@@ -227,10 +228,18 @@
   }
 
   function wireImport() {
-    var form = document.getElementById("import-form");
-    var input = document.getElementById("file");
-    var drop = document.getElementById("drop");
-    var detected = document.getElementById("detected");
+    wireDrop("import-form", "file", "drop", "detected");
+  }
+
+  function wireExchange() {
+    wireDrop("exchange-form", "exchange-file", "exchange-drop", "exchange-detected");
+  }
+
+  function wireDrop(formId, inputId, dropId, detectedId) {
+    var form = document.getElementById(formId);
+    var input = document.getElementById(inputId);
+    var drop = document.getElementById(dropId);
+    var detected = document.getElementById(detectedId);
     if (!form || !input) {
       return;
     }
@@ -294,7 +303,8 @@
           return;
         }
         if (payload.ok === "yes") {
-          detected.textContent = "Detected source: " + payload.name + (payload.group ? " (" + payload.group + ")." : ".");
+          var extra = payload.note ? " " + payload.note : "";
+          detected.textContent = "Detected source: " + payload.name + (payload.group ? " (" + payload.group + ")." : ".") + extra;
         } else {
           detected.textContent = payload.error || "No parser recognised those headers.";
         }
