@@ -26,7 +26,10 @@ def test_brought_forward_losses_stop_at_the_allowance() -> None:
 def test_opening_losses_fill_boxes_45_and_47(tmp_path: Path) -> None:
     desk = Desk(tmp_path)
     save_opening(desk.root, "2026", "4000")
-    assert os.stat(desk.root / "opening-losses.json").st_mode & 0o777 == 0o600
+    opening = desk.root / "opening-losses.json"
+    assert opening.is_file()
+    if os.name == "posix":
+        assert opening.stat().st_mode & 0o777 == 0o600
     row = for_year(desk, 2026)
     assert row["brought_used"] == "0.00"
     assert row["carried"] == "4000.00"

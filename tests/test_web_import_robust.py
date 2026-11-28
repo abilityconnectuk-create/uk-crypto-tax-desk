@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -83,7 +84,9 @@ def test_semicolon_export_imports_once_and_a_repeat_does_not_duplicate(tmp_path:
     assert len(desk.all_rows()) == 1
     events = (desk.root / "events.jsonl").read_text(encoding="utf-8")
     assert "import-skip" in events
-    assert oct((desk.root / "events.jsonl").stat().st_mode & 0o777) == "0o600"
+    events_path = desk.root / "events.jsonl"
+    if os.name == "posix":
+        assert oct(events_path.stat().st_mode & 0o777) == "0o600"
 
 
 def test_same_bytes_still_raise_from_import_bytes(tmp_path: Path) -> None:

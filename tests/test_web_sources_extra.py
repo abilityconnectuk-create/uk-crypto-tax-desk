@@ -173,5 +173,8 @@ def _tx(address: str, value: str = "1000000000000000000") -> bytes:
 
 
 def _assert_owner_only(path: Path) -> None:
+    """Require mode 0600 where the system records a file mode."""
     assert path.is_file()
+    if os.name != "posix":
+        return
     assert os.stat(path).st_mode & 0o777 == 0o600
