@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block body %}
+    <div class="page-head">
+        <div>
+            <h1>Ready to file</h1>
+            <p class="lede">
+                {{ view.label }} before the figures are handed to an accountant.
+                Each open item links to the page where it is fixed.
+                An accepted gap is a known limit and does not stop the year.
+                This page does not change a tax figure and it does not write to Koinly.
+            </p>
+            <p>
+                <span class="status {{ view.status_class }}">{{ view.status }}</span>
+            </p>
+            <p>{{ view.summary }}</p>
+        </div>
+        {% if not printable %}
+            <div class="actions">
+                <a class="btn" href="/ready/print?tax_year={{ tax_year }}">Print view</a>
+                <a class="btn ghost" href="/ready.csv?tax_year={{ tax_year }}">Download CSV</a>
+            </div>
+        {% endif %}
+    </div>
+    {% if printable %}
+        <p class="fine">Print view for {{ view.label }}.</p>
+    {% else %}
+        <form method="post" action="/ready/threshold" class="filters">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="tax_year" value="{{ tax_year }}">
+            <label>
+                Difference above
+                <input name="threshold" value="{{ view.threshold }}">
+            </label>
+            <button type="submit" class="ghost">Save threshold</button>
+        </form>
+        <p class="fine">
+            A Koinly money difference is listed when it is above {{ view.threshold|gbp }}.
+            The default is one pound. A disposal count is listed for any difference.
+        </p>
+    {% endif %}
+    <h2>Counts</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Category</th>
+                <th>Count</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in view.counts %}
+                <tr>
+                    <td>{{ row.label }}</td>
+                    <td>{{ row.count }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <h2>Open items</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Category</th>
+                <th>Item</th>
+                <th>Page</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in view["items"] %}
+                <tr>
+                    <td>{{ row.category_label }}</td>
+                    <td>{{ row.name }}. {{ row.detail }}</td>
+                    <td>
+                        <a href="{{ row.href }}">Open</a>
+                    </td>
+                </tr>
+            {% else %}
+                <tr>
+                    <td colspan="3">No open items.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% endblock %}

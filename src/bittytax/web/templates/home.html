@@ -88,6 +88,16 @@
             </form>
         </section>
     {% endif %}
+    <section class="card pad" aria-labelledby="ready-heading">
+        <h2 id="ready-heading">Ready to file</h2>
+        <p>
+            <span class="status {{ view.filing.status_class }}">{{ view.filing.status }}</span>
+        </p>
+        <p class="fine">{{ view.filing.summary }}</p>
+        <p>
+            <a href="/ready?tax_year={{ view.tax_year }}">Open the checklist</a>
+        </p>
+    </section>
     <div class="grid-3">
         <section class="card pad">
             <h2>Allocation</h2>
