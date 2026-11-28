@@ -36,6 +36,7 @@ from .errors import DeskError
 from .identity import LOOPBACK, actor_for, trusted_tailscale_user
 from .koinly_check import compare_year, load_uploads, store_uploads
 from .pack import pack_context, pack_lines, render_pdf
+from .planning import hypothetical, plan_view
 from .prices import fetch_missing, load_misses, missing_slots
 from .rules import accountant_review_items
 from .sa108 import sa108_view
@@ -225,6 +226,8 @@ def _handler_for(  # pylint: disable=too-many-statements
                 ("POST", "/koinly"): self._koinly_post,
                 ("GET", "/prices"): self._prices,
                 ("POST", "/prices/fetch"): self._prices_fetch,
+                ("GET", "/plan"): lambda: self._plan("", None, {}),
+                ("POST", "/plan"): self._plan_post,
                 ("GET", "/sync"): self._sync,
                 ("POST", "/sync/ethereum"): self._sync_ethereum,
                 ("POST", "/sync/kraken"): self._sync_kraken,
@@ -431,6 +434,28 @@ def _handler_for(  # pylint: disable=too-many-statements
         def _prices_fetch(self) -> None:
             fetch_missing(desk)
             self._redirect("/prices")
+
+        def _plan(
+            self, error: str, result: Optional[Dict[str, str]], form: Mapping[str, str]
+        ) -> None:
+            view = plan_view(desk)
+            view["result"] = result
+            blank = {"asset": "", "quantity": "", "day": "", "proceeds": ""}
+            blank.update(form)
+            self._page("plan.html", "Planning", section="plan", view=view, error=error, form=blank)
+
+        def _plan_post(self) -> None:
+            form = {
+                key: self._req.form.get(key, "") for key in ("asset", "quantity", "day", "proceeds")
+            }
+            try:
+                result = hypothetical(
+                    desk, form["asset"], form["quantity"], form["day"], form["proceeds"]
+                )
+            except DeskError as exc:
+                self._plan(str(exc), None, form)
+                return
+            self._plan("", result, form)
 
         def _sync(self) -> None:
             self._page("sync.html", "Sync", section="sync", secrets=secrets_present(desk))

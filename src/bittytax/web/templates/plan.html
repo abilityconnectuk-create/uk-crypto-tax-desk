@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block body %}
+    <h1>Planning</h1>
+    <p class="banner">{{ view.disclaimer }}</p>
+    <p class="lede">Figures for {{ view.board.label }}. The annual exempt amount is shown and is not deducted. {{ view.board.banner }}</p>
+    {% if error %}<p class="warn">{{ error }}</p>{% endif %}
+    <ul class="stats">
+        <li><strong>{{ view.board.allowance_remaining|gbp }}</strong> annual exempt amount remaining</li>
+        <li><strong>{{ view.board.realised|gbp }}</strong> realised gain so far</li>
+    </ul>
+    {% if view.board.holdings %}
+        <h2>Unrealised</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Asset</th>
+                    <th>Quantity</th>
+                    <th>Cost</th>
+                    <th>Unrealised</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in view.board.holdings %}
+                    <tr>
+                        <td>{{ row.asset }}</td>
+                        <td>{{ row.quantity }}</td>
+                        <td>{{ row.cost|gbp }}</td>
+                        <td>{{ row.unrealised|gbp }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+    <h2>What if I sold</h2>
+    <form method="post" action="/plan">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label for="asset">Asset</label>
+        <input id="asset" name="asset" value="{{ form.asset }}">
+        <label for="quantity">Quantity</label>
+        <input id="quantity" name="quantity" value="{{ form.quantity }}">
+        <label for="day">Date</label>
+        <input id="day" name="day" placeholder="YYYY-MM-DD" value="{{ form.day }}">
+        <label for="proceeds">Proceeds in GBP</label>
+        <input id="proceeds" name="proceeds" value="{{ form.proceeds }}">
+        <button type="submit">Calculate</button>
+    </form>
+    {% if view.result %}
+        <h2>Calculator result</h2>
+        <p>{{ view.result.disclaimer }}</p>
+        <table>
+            <tbody>
+                <tr>
+                    <th>Sale</th>
+                    <td>
+                        {{ view.result.quantity }} {{ view.result.asset }} on {{ view.result.day }}
+                        for {{ view.result.proceeds|gbp }}
+                    </td>
+                </tr>
+                <tr>
+                    <th>Gain before</th>
+                    <td>{{ view.result.baseline_gain|gbp }}</td>
+                </tr>
+                <tr>
+                    <th>Gain if sold</th>
+                    <td>{{ view.result.hypothetical_gain|gbp }}</td>
+                </tr>
+                <tr>
+                    <th>Difference</th>
+                    <td>{{ view.result.difference|gbp }}</td>
+                </tr>
+            </tbody>
+        </table>
+    {% endif %}
+{% endblock %}
