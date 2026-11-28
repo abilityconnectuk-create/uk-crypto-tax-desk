@@ -112,6 +112,113 @@
             <textarea id="why-{{ row.id }}" name="why" required rows="3"></textarea>
             <button type="submit">Save reclassification</button>
         </form>
+        {% if row.tag_choices is defined %}
+            <h3>Row editor</h3>
+            {% if row.tag_banner %}<p class="banner">{{ row.tag_banner }}</p>{% endif %}
+            {% if row.tag_note %}<p>{{ row.tag_note }}</p>{% endif %}
+            {% if row.tag_hint %}<p>{{ row.tag_hint }}</p>{% endif %}
+            {% if row.tag_flag %}<p class="warn">Flagged: {{ row.tag_flag }}. The return box is not yet confirmed.</p>{% endif %}
+            <form class="stack"
+                  method="post"
+                  action="/transactions/{{ row.import_id }}/{{ row.id.split(':')[1] }}">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <input type="hidden" name="editor" value="workspace">
+                <label for="workspace-tag-{{ row.id }}">Tag</label>
+                <select id="workspace-tag-{{ row.id }}" name="tag">
+                    <option value="">No tag</option>
+                    {% for item in row.tag_choices %}
+                        <option value="{{ item.id }}"
+                                {% if item.id == row.tag %}selected{% endif %}>{{ item.label }}</option>
+                    {% endfor %}
+                </select>
+                <label>
+                    <input type="checkbox"
+                           name="reviewed"
+                           value="yes"
+                           {% if row.reviewed %}checked{% endif %}>
+                    Reviewed
+                </label>
+                <label for="gbp-{{ row.id }}">GBP override</label>
+                <input id="gbp-{{ row.id }}"
+                       name="gbp"
+                       value="{{ row.gbp }}"
+                       placeholder="Blank means the market value">
+                <label for="airdrop-{{ row.id }}">Airdrop choice</label>
+                <select id="airdrop-{{ row.id }}" name="airdrop_choice">
+                    <option value="">No automatic treatment</option>
+                    <option value="income"
+                            {% if row.airdrop_choice == "income" %}selected{% endif %}>Income</option>
+                    <option value="market"
+                            {% if row.airdrop_choice == "market" %}selected{% endif %}>Market value</option>
+                    <option value="nil"
+                            {% if row.airdrop_choice == "nil" %}selected{% endif %}>Nil, newly minted</option>
+                </select>
+                <label>
+                    <input type="checkbox"
+                           name="spouse"
+                           value="yes"
+                           {% if row.spouse == "yes" %}checked{% endif %}>
+                    Spouse or civil partner
+                </label>
+                <label for="pool-protocol-{{ row.id }}">Pool protocol</label>
+                <input id="pool-protocol-{{ row.id }}"
+                       name="pool_protocol"
+                       value="{{ row.pool_protocol }}">
+                <label>
+                    <input type="checkbox"
+                           name="pool_same_token"
+                           value="yes"
+                           {% if row.pool_same_token == "yes" %}checked{% endif %}>
+                    Same token returns
+                </label>
+                <label>
+                    <input type="checkbox"
+                           name="pool_receipt"
+                           value="yes"
+                           {% if row.pool_receipt == "yes" %}checked{% endif %}>
+                    Receipt token
+                </label>
+                <label>
+                    <input type="checkbox"
+                           name="pool_restricted"
+                           value="yes"
+                           {% if row.pool_restricted == "yes" %}checked{% endif %}>
+                    Restricted custody
+                </label>
+                <label for="linked-fee-{{ row.id }}">Linked fee row</label>
+                <input id="linked-fee-{{ row.id }}"
+                       name="linked_fee"
+                       value="{{ row.linked_fee }}">
+                <label for="chain-{{ row.id }}">Chain</label>
+                <input id="chain-{{ row.id }}" name="chain" value="{{ row.chain }}">
+                <button type="submit">Save row</button>
+            </form>
+            <h3>Value audit</h3>
+            {% if row.audit %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>When</th>
+                            <th>Field</th>
+                            <th>Old</th>
+                            <th>New</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for entry in row.audit %}
+                            <tr>
+                                <td>{{ entry.at }}</td>
+                                <td>{{ entry.field }}</td>
+                                <td>{{ entry.old }}</td>
+                                <td>{{ entry.new }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p>No value overrides yet. A blank GBP value means the market value.</p>
+            {% endif %}
+        {% endif %}
         <h3>Change log</h3>
         {% if row.log %}
             <table>

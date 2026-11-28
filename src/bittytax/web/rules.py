@@ -91,6 +91,19 @@ def defi_tags() -> List[Dict[str, str]]:
                 "effect": str(tag.get("effect") or ""),
                 "manual": str(tag.get("manual") or ""),
             }
+    from .tag_set import catalogue  # pylint: disable=import-outside-toplevel
+
+    for tag in catalogue():
+        found.setdefault(
+            str(tag["id"]),
+            {
+                "id": str(tag["id"]),
+                "label": str(tag.get("label") or tag["id"]),
+                "note": str(tag.get("note") or "").strip(),
+                "effect": str(tag.get("effect") or ""),
+                "manual": str(tag.get("manual") or ""),
+            },
+        )
     return list(found.values())
 
 

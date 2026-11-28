@@ -4,9 +4,14 @@
     <div class="page-head">
         <div>
             <h1>Transactions</h1>
-            <p class="lede">Search, filter, and open a row to reclassify it. The uploaded file is not edited.</p>
+            <p class="lede">
+                Every imported row, most recent first. The uploaded file is not edited.
+                Nothing on this page is sent to Koinly.
+            </p>
+            <p class="banner">{{ banner }}. Unconfirmed tags do not change filed figures.</p>
         </div>
     </div>
+    {% if error %}<p class="warn">{{ error }}</p>{% endif %}
     <form class="filters" method="get" action="/transactions">
         <label class="sr" for="tx-search">Search transactions</label>
         <input id="tx-search"
@@ -50,11 +55,11 @@
             <div class="menu">
                 <label>
                     Type
-                    <select name="kind" class="js-auto">
+                    <select name="tx_class" class="js-auto">
                         <option value="">Any</option>
-                        {% for kind in listing.types %}
-                            <option value="{{ kind }}"
-                                    {% if filters.kind == kind %}selected{% endif %}>{{ kind }}</option>
+                        {% for code, label in listing.classes %}
+                            <option value="{{ code }}"
+                                    {% if filters.tx_class == code %}selected{% endif %}>{{ label }}</option>
                         {% endfor %}
                     </select>
                 </label>
@@ -75,15 +80,29 @@
             </div>
         </details>
         <details class="pill-menu">
-            <summary>Warnings</summary>
+            <summary>Manual</summary>
             <div class="menu">
                 <label>
-                    Warnings
-                    <select name="status" class="js-auto">
+                    Manual
+                    <select name="manual" class="js-auto">
                         <option value="">Any</option>
-                        {% for status in ["warnings", "needs-review", "spam", "unmapped", "reclassified", "clear"] %}
-                            <option value="{{ status }}"
-                                    {% if filters.status == status %}selected{% endif %}>{{ status }}</option>
+                        <option value="yes" {% if filters.manual == "yes" %}selected{% endif %}>Manual only</option>
+                        <option value="no" {% if filters.manual == "no" %}selected{% endif %}>Imported only</option>
+                    </select>
+                </label>
+            </div>
+        </details>
+        <details class="pill-menu">
+            <summary>Warning</summary>
+            <div class="menu">
+                <label>
+                    Warning
+                    <select name="warning" class="js-auto">
+                        <option value="">Any</option>
+                        <option value="any" {% if filters.warning == "any" %}selected{% endif %}>Any warning</option>
+                        {% for code, label in listing.warnings %}
+                            <option value="{{ code }}"
+                                    {% if filters.warning == code %}selected{% endif %}>{{ label }}</option>
                         {% endfor %}
                     </select>
                 </label>
@@ -92,6 +111,36 @@
         <details class="pill-menu">
             <summary>Date</summary>
             <div class="menu">
+                <fieldset>
+                    <legend>Clock</legend>
+                    <label>
+                        <input type="radio"
+                               name="clock"
+                               value="utc"
+                               {% if filters.clock != "uk" %}checked{% endif %}>
+                        UTC
+                    </label>
+                    <label>
+                        <input type="radio"
+                               name="clock"
+                               value="uk"
+                               {% if filters.clock == "uk" %}checked{% endif %}>
+                        UK time
+                    </label>
+                </fieldset>
+                <p class="fine">UTC treats the stored time as UTC. UK time converts that to Europe/London.</p>
+                <label>
+                    Tax year
+                    <select name="tax_quick">
+                        <option value="">Custom dates</option>
+                        {% for ending in [2025, 2026, 2027] %}
+                            <option value="{{ ending }}"
+                                    {% if filters.tax_quick == ending|string %}selected{% endif %}>
+                                6 Apr {{ ending - 1 }} to 5 Apr {{ ending }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </label>
                 <label>
                     From
                     <input name="date_from"
@@ -105,11 +154,104 @@
             </div>
         </details>
         <details class="pill-menu">
-            <summary>+ Add filter</summary>
+            <summary>Add filter</summary>
             <div class="menu">
                 <label>
-                    Also contains
-                    <input name="extra" value="{{ filters.extra }}">
+                    Amount from
+                    <input name="amount_min" value="{{ filters.amount_min }}">
+                </label>
+                <label>
+                    Amount to
+                    <input name="amount_max" value="{{ filters.amount_max }}">
+                </label>
+                <label>
+                    Net value from
+                    <input name="net_min" value="{{ filters.net_min }}">
+                </label>
+                <label>
+                    Net value to
+                    <input name="net_max" value="{{ filters.net_max }}">
+                </label>
+                <label>
+                    Fee value from
+                    <input name="fee_min" value="{{ filters.fee_min }}">
+                </label>
+                <label>
+                    Fee value to
+                    <input name="fee_max" value="{{ filters.fee_max }}">
+                </label>
+                <label>
+                    Gain from
+                    <input name="gain_min" value="{{ filters.gain_min }}">
+                </label>
+                <label>
+                    Gain to
+                    <input name="gain_max" value="{{ filters.gain_max }}">
+                </label>
+                <label>
+                    Description
+                    <input name="description" value="{{ filters.description }}">
+                </label>
+                <label>
+                    Sender
+                    <input name="sender" value="{{ filters.sender }}">
+                </label>
+                <label>
+                    Recipient
+                    <input name="recipient" value="{{ filters.recipient }}">
+                </label>
+                <label>
+                    Tx hash
+                    <input name="tx_hash" value="{{ filters.tx_hash }}">
+                </label>
+                <label>
+                    Contract
+                    <input name="contract" value="{{ filters.contract }}">
+                </label>
+                <label>
+                    Method
+                    <input name="method" value="{{ filters.method }}">
+                </label>
+                <label>
+                    Value source
+                    <input name="value_source" value="{{ filters.value_source }}">
+                </label>
+                <label>
+                    Issues
+                    <input name="issues" value="{{ filters.issues }}">
+                </label>
+                <label>
+                    Deleted
+                    <select name="deleted">
+                        <option value="">Hide deleted</option>
+                        <option value="yes" {% if filters.deleted == "yes" %}selected{% endif %}>Deleted only</option>
+                        <option value="any"
+                                {% if filters.deleted == "any" %}selected{% endif %}>Include deleted</option>
+                    </select>
+                </label>
+                <label>
+                    Spam
+                    <select name="spam">
+                        <option value="">Any</option>
+                        <option value="yes" {% if filters.spam == "yes" %}selected{% endif %}>Spam</option>
+                        <option value="no" {% if filters.spam == "no" %}selected{% endif %}>Not spam</option>
+                    </select>
+                </label>
+                <label>
+                    Import source
+                    <input name="import_source" value="{{ filters.import_source }}">
+                </label>
+                <label>
+                    Import type
+                    <input name="import_type" value="{{ filters.import_type }}">
+                </label>
+                <label>
+                    Import date from
+                    <input name="import_date_from" value="{{ filters.import_date_from }}">
+                </label>
+                <label>
+                    Import date to
+                    <input name="import_date_to" value="{{ filters.import_date_to }}">
                 </label>
             </div>
         </details>
@@ -124,12 +266,78 @@
         <input type="hidden" name="per" value="{{ per }}">
         <button type="submit" class="ghost">Apply</button>
     </form>
+    <details class="card pad">
+        <summary>Add transaction</summary>
+        <form class="stack" method="post" action="/transactions/add">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <fieldset>
+                <legend>Kind</legend>
+                {% for code, label in [("deposit", "Deposit"), ("withdrawal", "Withdrawal"), ("trade", "Trade"), ("transfer", "Transfer")] %}
+                    <label>
+                        <input type="radio"
+                               name="kind"
+                               value="{{ code }}"
+                               {% if loop.first %}required{% endif %}>
+                        {{ label }}
+                    </label>
+                {% endfor %}
+            </fieldset>
+            <label>
+                Amount in
+                <input name="buy_quantity">
+            </label>
+            <label>
+                Asset in
+                <input name="buy_asset">
+            </label>
+            <label>
+                Amount out
+                <input name="sell_quantity">
+            </label>
+            <label>
+                Asset out
+                <input name="sell_asset">
+            </label>
+            <label>
+                Fiat value
+                <input name="fiat_value" placeholder="Blank uses the market value">
+            </label>
+            <label>
+                Date
+                <input name="date" required placeholder="YYYY-MM-DD">
+            </label>
+            <label>
+                Tx hash
+                <input name="tx_hash">
+            </label>
+            <label>
+                From wallet
+                <input name="from_wallet">
+            </label>
+            <label>
+                To wallet
+                <input name="to_wallet">
+            </label>
+            <label>
+                Tag
+                <input name="tag">
+            </label>
+            <label>
+                Description
+                <input name="description">
+            </label>
+            <button type="submit">Save transaction</button>
+        </form>
+    </details>
     <form method="post" action="/transactions/bulk">
         <input type="hidden" name="csrf" value="{{ csrf }}">
+        {% for key, value in listing.kept.items() %}
+            <input type="hidden" name="{{ key }}" value="{{ value }}">
+        {% endfor %}
         <div class="card pad bulk-bar">
             <label>
                 Type
-                <select name="type">
+                <select name="bulk_type">
                     <option value="">Keep type</option>
                     {% for kind in kinds %}
                         <option value="{{ kind }}">{{ kind }}</option>
@@ -138,69 +346,89 @@
             </label>
             <label>
                 Tag
-                <input name="tag" placeholder="DeFi tag id">
+                <input name="bulk_tag" placeholder="Tag id">
             </label>
             <label>
                 Why
-                <input name="why" placeholder="Reason">
+                <input name="bulk_why" placeholder="Reason">
+            </label>
+            <label>
+                Apply to
+                <select name="scope">
+                    <option value="">Selected rows</option>
+                    <option value="filtered">All filtered rows</option>
+                </select>
             </label>
             <button type="submit" name="action" value="reclassify">Reclassify</button>
             <button type="submit" name="action" value="tag">Tag</button>
             <button type="submit" name="action" value="spam">Spam</button>
             <button type="submit" name="action" value="ignore">Ignore</button>
             <button type="submit" name="action" value="undo">Undo</button>
+            <button type="submit" name="action" value="delete">Delete</button>
+            <button type="submit" name="action" value="restore">Restore</button>
+            <button type="submit" name="action" value="aggregate">Aggregate</button>
         </div>
+        <p class="fine">{{ listing.total }} transactions. Deleted rows stay out of the tax file until restored.</p>
         <div class="card tx-list">
-            {% for row in listing.rows %}
-                {% set asset = row.buy_asset or row.sell_asset %}
-                {% set qty = row.buy_quantity or row.sell_quantity %}
-                {% set value = row.buy_value or row.sell_value %}
-                <div class="tx-select">
-                    <label class="tick">
-                        <input type="checkbox"
-                               name="row_id"
-                               value="{{ row.id }}"
-                               aria-label="Select {{ row.id }}">
-                    </label>
-                    <a class="tx-row"
-                       href="/transactions/{{ row.import_id }}/{{ row.id.split(':')[1] }}">
-                        <span class="tx-main">
-                            <span class="kind" aria-hidden="true">{{ row.type[:1] }}</span>
-                            <span class="two">
-                                <strong>{{ row.type }}</strong>
-                                <small>{{ row.date }}</small>
+            {% for group in listing.groups %}
+                <h2 class="tx-day">{{ group.label }}</h2>
+                {% for row in group.rows %}
+                    {% set asset = row.buy_asset or row.sell_asset %}
+                    {% set qty = row.buy_quantity or row.sell_quantity %}
+                    {% set value = row.buy_value or row.sell_value %}
+                    <div class="tx-select">
+                        <label class="tick">
+                            <input type="checkbox"
+                                   name="row_id"
+                                   value="{{ row.id }}"
+                                   aria-label="Select {{ row.id }}">
+                        </label>
+                        <a class="tx-row"
+                           href="/transactions/{{ row.import_id }}/{{ row.id.split(':')[1] }}">
+                            <span class="tx-main">
+                                <span class="kind" aria-hidden="true">{{ row.type[:1] }}</span>
+                                <span class="two">
+                                    <strong>{{ row.type }}</strong>
+                                    <small>{{ row.filter_date }}</small>
+                                </span>
                             </span>
-                        </span>
-                        <span class="tx-asset">
-                            <span class="letter av-{{ asset|slot }}">{{ (asset or "?")[:1] }}</span>
-                            <span class="two">
-                                <strong>{{ qty }} {{ asset }}</strong>
-                                <small>{{ value|gbp }}</small>
+                            <span class="tx-asset">
+                                <span class="letter av-{{ asset|slot }}">{{ (asset or "?")[:1] }}</span>
+                                <span class="two">
+                                    <strong>{{ qty }} {{ asset }}</strong>
+                                    <small>{{ value|gbp }}</small>
+                                </span>
                             </span>
-                        </span>
-                        <span class="tx-side">
-                            {% if row.note %}<span class="tag">{{ row.note }}</span>{% endif %}
-                            {% if row.status != "clear" %}<span class="tag warn">{{ row.status }}</span>{% endif %}
-                            {% if row.status in ["needs-review", "spam", "unmapped"] %}
-                                <span class="warn-icon" aria-label="Warning">!</span>
-                            {% endif %}
-                            <code class="chip">{{ row.id.split(":")[1] }}</code>
-                        </span>
-                    </a>
-                </div>
+                            <span class="tx-side">
+                                {% if row.manual %}<span class="tag mark-m" aria-label="Manual">M</span>{% endif %}
+                                {% if row.note %}<span class="tag">{{ row.note }}</span>{% endif %}
+                                {% for label in row.warning_labels %}<span class="tag warn">{{ label }}</span>{% endfor %}
+                                <code class="chip">{{ row.id.split(":")[1] }}</code>
+                            </span>
+                        </a>
+                        {% if row.explorer %}
+                            <a href="{{ row.explorer }}">{{ row.tx_hash }}</a>
+                        {% elif row.tx_hash %}
+                            <code class="chip">{{ row.tx_hash }}</code>
+                        {% endif %}
+                    </div>
+                {% endfor %}
             {% else %}
                 <p class="pad">No transactions match.</p>
             {% endfor %}
         </div>
     </form>
+    <p class="fine">
+        <a href="/transactions/export.csv?{{ qs }}">Export CSV</a>
+        <a href="/transactions/export.xlsx?{{ qs }}">Export spreadsheet</a>
+    </p>
     <div class="card">
         <div class="pager">
             <p>{{ listing.total }} transactions</p>
             <form method="get" action="/transactions">
-                {% for key in ["query", "date_from", "date_to", "asset", "wallet", "kind", "status", "tag", "extra"] %}
-                    <input type="hidden" name="{{ key }}" value="{{ filters[key] }}">
+                {% for key, value in listing.kept.items() %}
+                    <input type="hidden" name="{{ key }}" value="{{ value }}">
                 {% endfor %}
-                <input type="hidden" name="sort" value="{{ sort }}">
                 <label>
                     Per page
                     <select name="per" class="js-auto" aria-label="Rows per page">
@@ -222,6 +450,54 @@
             </p>
         </div>
     </div>
+    <form class="card pad"
+          method="post"
+          action="/transactions/import-preview"
+          enctype="multipart/form-data">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <h2>Bulk edit</h2>
+        <p>Export the rows, edit the file, then preview the difference before anything is applied.</p>
+        <label>
+            Edited CSV or spreadsheet
+            <input type="file" name="file" required>
+        </label>
+        <button type="submit">Preview differences</button>
+    </form>
+    {% if listing.preview and listing.preview.changes is defined %}
+        <div class="card pad">
+            <h2>Import diff</h2>
+            {% if listing.preview.changes %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Row</th>
+                            <th>Field</th>
+                            <th>Old</th>
+                            <th>New</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for change in listing.preview.changes %}
+                            {% for field in change.fields %}
+                                <tr>
+                                    <td>{{ change.id }}</td>
+                                    <td>{{ field.field }}</td>
+                                    <td>{{ field.old }}</td>
+                                    <td>{{ field.new }}</td>
+                                </tr>
+                            {% endfor %}
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <form method="post" action="/transactions/import-apply">
+                    <input type="hidden" name="csrf" value="{{ csrf }}">
+                    <button type="submit">Apply import</button>
+                </form>
+            {% else %}
+                <p>No differences to apply.</p>
+            {% endif %}
+        </div>
+    {% endif %}
     {% if panel %}
         <aside class="slide-aside" aria-label="Transaction detail">
             {{ ui.tx_panel(panel, panel_error, saved, "/transactions?" + qs) }}

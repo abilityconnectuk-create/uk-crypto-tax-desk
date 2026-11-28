@@ -15,7 +15,7 @@ from email.parser import BytesParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
-from urllib.parse import parse_qs, quote, urlencode, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 import jinja2
 
@@ -101,9 +101,18 @@ from .tax_views import (
     spam_page,
     valuation_rows,
 )
+from .tx_http import (
+    add,
+    bulk,
+    config_lists,
+    export_file,
+    import_apply,
+    import_preview,
+)
+from .tx_http import save_settings as save_tx_settings
+from .tx_http import save_transaction, show_transaction, show_transactions, tag_years
 from .updater import describe, repo_root, update_checkout
 from .user_rules import (
-    apply_bulk,
     apply_enabled_rules,
     load_rules,
     preview_rule,
@@ -270,10 +279,10 @@ def _handler_for(  # pylint: disable=too-many-statements
                 return
             row = _ROW_PATH.match(path)
             if row and method == "GET":
-                self._transaction(f"{row.group(1)}:{row.group(2)}", "")
+                show_transaction(self, desk, f"{row.group(1)}:{row.group(2)}", "")
                 return
             if row and method == "POST":
-                self._reclassify(f"{row.group(1)}:{row.group(2)}")
+                save_transaction(self, desk, f"{row.group(1)}:{row.group(2)}")
                 return
             routes = {
                 ("GET", "/"): self._home,
@@ -288,8 +297,26 @@ def _handler_for(  # pylint: disable=too-many-statements
                 ("POST", "/import/exchange"): self._exchange_post,
                 ("GET", "/exchanges"): lambda: self._exchanges(query),
                 ("POST", "/review/exchange"): self._exchange_accept,
-                ("GET", "/transactions"): lambda: self._transactions(query),
-                ("POST", "/transactions/bulk"): self._bulk,
+                ("GET", "/transactions"): lambda: show_transactions(self, desk, query),
+                ("POST", "/transactions/bulk"): lambda: bulk(self, desk),
+                ("POST", "/transactions/add"): lambda: add(self, desk),
+                ("GET", "/transactions/export.csv"): lambda: export_file(self, desk, query, "csv"),
+                ("POST", "/transactions/export.csv"): lambda: export_file(self, desk, query, "csv"),
+                ("GET", "/transactions/export.xlsx"): lambda: export_file(
+                    self, desk, query, "xlsx"
+                ),
+                ("POST", "/transactions/export.xlsx"): lambda: export_file(
+                    self, desk, query, "xlsx"
+                ),
+                ("POST", "/transactions/import-preview"): lambda: import_preview(
+                    self,
+                    desk,
+                    *_uploaded_file(self.headers.get("Content-Type", ""), self._req.raw),
+                ),
+                ("POST", "/transactions/import-apply"): lambda: import_apply(self, desk),
+                ("POST", "/settings/lists"): lambda: save_tx_settings(
+                    self, desk, _listed_file(self)
+                ),
                 ("GET", "/rules"): lambda: self._rules(query),
                 ("POST", "/rules"): self._rules_add,
                 ("POST", "/rules/apply"): self._rules_apply,
@@ -484,67 +511,6 @@ def _handler_for(  # pylint: disable=too-many-statements
             again = "&again=1" if entry.get("idempotent") else ""
             self._redirect(f"/import?imported={quote(entry['id'])}{again}")
 
-        def _transactions(self, query: Mapping[str, List[str]]) -> None:
-            filters = {
-                key: _field(query, key)
-                for key in (
-                    "query",
-                    "date_from",
-                    "date_to",
-                    "asset",
-                    "wallet",
-                    "kind",
-                    "status",
-                    "tag",
-                    "extra",
-                )
-            }
-            page = _page_number(_field(query, "page"))
-            per_page = _per_page(_field(query, "per"))
-            sort = _field(query, "sort") or "date"
-            listing = desk.transactions(filters, page, per_page=per_page, sort=sort)
-            kept = {key: value for key, value in filters.items() if value}
-            kept["sort"] = sort
-            kept["per"] = str(listing["per_page"])
-            panel = None
-            panel_error = ""
-            open_id = _field(query, "open")
-            if open_id:
-                try:
-                    panel = desk.transaction(open_id)
-                except DeskError as exc:
-                    panel_error = str(exc)
-            self._page(
-                "transactions.html",
-                "Transactions",
-                section="transactions",
-                listing=listing,
-                filters=filters,
-                qs=urlencode(kept),
-                sort=sort,
-                per=listing["per_page"],
-                panel=panel,
-                panel_error=panel_error,
-                open_id=open_id,
-                kinds=allowed_types(),
-            )
-
-        def _bulk(self) -> None:
-            backup_now(desk.root, "before a bulk change", self._actor())
-            parsed = parse_qs(
-                self._req.raw.decode("utf-8", errors="replace"), keep_blank_values=True
-            )
-            apply_bulk(
-                desk,
-                parsed.get("row_id", []),
-                _first(parsed, "action"),
-                _first(parsed, "type"),
-                _first(parsed, "tag"),
-                _first(parsed, "why"),
-                self._actor(),
-            )
-            self._redirect("/transactions")
-
         def _rules(self, query: Mapping[str, List[str]]) -> None:
             rules = load_rules(desk.root)
             chosen = _field(query, "preview")
@@ -584,32 +550,6 @@ def _handler_for(  # pylint: disable=too-many-statements
             enabled = self._req.form.get("enabled", "") == "yes"
             set_enabled(desk.root, rule_id, enabled)
             self._redirect("/rules")
-
-        def _transaction(self, row_id: str, error: str) -> None:
-            self._page(
-                "transaction.html",
-                "Reclassify",
-                section="transactions",
-                row=desk.transaction(row_id),
-                error=error,
-            )
-
-        def _reclassify(self, row_id: str) -> None:
-            form = self._req.form
-            try:
-                actor = self._actor()
-                desk.reclassify(
-                    row_id,
-                    _form_value(form, "type"),
-                    _form_value(form, "why"),
-                    actor,
-                    _form_value(form, "tag"),
-                )
-            except DeskError as exc:
-                self._transaction(row_id, str(exc))
-                return
-            import_id, seq = row_id.split(":", 1)
-            self._redirect(f"/transactions/{import_id}/{seq}?saved=1")
 
         def _login_get(self) -> None:
             if self._req.session.user:
@@ -1180,6 +1120,8 @@ def _handler_for(  # pylint: disable=too-many-statements
                 section="config",
                 config=config_snapshot(desk.wallets_path),
                 rule_years=list_rule_years(),
+                lists=config_lists(desk),
+                tag_years=tag_years(),
             )
 
         def _about(self) -> None:
@@ -1350,6 +1292,14 @@ def _form(content_type: str, body: bytes) -> Dict[str, str]:
 
 def _form_value(form: Mapping[str, str], key: str) -> str:
     return form.get(key, "")
+
+
+def _listed_file(handler: Any) -> Optional[Tuple[str, bytes]]:
+    content = str(handler.headers.get("Content-Type", ""))
+    body = bytes(getattr(handler, "_req").raw)
+    if "multipart/form-data" not in content:
+        return None
+    return _uploaded_file(content, body)
 
 
 def _uploaded_file(content_type: str, body: bytes) -> Tuple[str, bytes]:
