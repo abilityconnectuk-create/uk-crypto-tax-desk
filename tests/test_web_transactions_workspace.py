@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import csv
 import io
+import subprocess
 import threading
 from datetime import date
 from decimal import Decimal
@@ -380,7 +381,7 @@ def test_warnings_and_ready_count(tmp_path: Path) -> None:
 def test_tag_set_is_unconfirmed_and_does_not_change_figures(tmp_path: Path) -> None:
     for ending, slug in ((2025, "2024-25"), (2026, "2025-26"), (2027, "2026-27")):
         loaded = document(ending)
-        raw = (ROOT / "config" / "tags" / f"{slug}.yaml").read_bytes()
+        raw = _committed_tags(slug)
         assert b"\r" not in raw
         assert loaded["confirmed"] is False
         assert loaded["banner"] == BANNER
@@ -516,6 +517,17 @@ def test_settings_lists_are_deletable(tmp_path: Path) -> None:
     delete_price(desk.root, price_id)
     desk.refresh_records()
     assert desk.transaction(row_id)["buy_value"] == ""
+
+
+def _committed_tags(slug: str) -> bytes:
+    """The tag file as stored in git. A Windows checkout can rewrite the working copy."""
+    completed = subprocess.run(
+        ["git", "show", f"HEAD:config/tags/{slug}.yaml"],
+        check=True,
+        capture_output=True,
+        cwd=ROOT,
+    )
+    return completed.stdout
 
 
 def _csv_bytes(rows: List[Dict[str, str]]) -> bytes:
