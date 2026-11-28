@@ -18,6 +18,7 @@ from .dashboard import dashboard, tax_year_containing
 from .errors import DeskError
 from .prices import latest_unit_prices
 from .store import Desk
+from .year_end import year_end_card
 
 _PENCE = Decimal("0.01")
 _SPANS = ("1m", "1y", "ytd", "tax", "all")
@@ -209,6 +210,7 @@ def build_home(
         "steps": guided_steps(desk.counts(), health_total),
         "health_total": health_total,
         "health": health,
+        "year_end": year_end_card(desk, moment),
     }
 
 

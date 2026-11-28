@@ -87,6 +87,7 @@ from .user_rules import (
     save_rule,
     set_enabled,
 )
+from .year_end import dismiss_year_end
 
 _STATIC = Path(__file__).resolve().parent / "static"
 _ROW_PATH = re.compile(r"^/transactions/([0-9A-Za-zT-]+)/([0-9]+)$")
@@ -253,6 +254,7 @@ def _handler_for(  # pylint: disable=too-many-statements
                 return
             routes = {
                 ("GET", "/"): self._home,
+                ("POST", "/year-end/dismiss"): self._year_end_dismiss,
                 ("GET", "/import"): self._import_form,
                 ("GET", "/import/add"): self._import_add,
                 ("GET", "/import/problems"): self._import_problems,
@@ -341,6 +343,10 @@ def _handler_for(  # pylint: disable=too-many-statements
                 view=view,
                 tax_year=view["tax_year"],
             )
+
+        def _year_end_dismiss(self) -> None:
+            dismiss_year_end(desk.root, date.today())
+            self._redirect("/")
 
         def _import_form(self) -> None:
             query = parse_qs(urlparse(self.path).query)
