@@ -1,0 +1,2 @@
+# Keep the tag files on LF. A Windows checkout must not insert a carriage return.
+config/tags/*.yaml text eol=lf
