@@ -20,6 +20,7 @@ import jinja2
 
 from ..report import ReportLog
 from . import DEFAULT_TAX_YEAR
+from .accountant_pack import build_zip
 from .auth import (
     DeskAuth,
     Session,
@@ -268,6 +269,7 @@ def _handler_for(  # pylint: disable=too-many-statements
                 ("GET", "/report"): lambda: self._report(query),
                 ("GET", "/report/pack"): lambda: self._pack(query, pdf=False),
                 ("GET", "/report/pack.pdf"): lambda: self._pack(query, pdf=True),
+                ("GET", "/report/accountant.zip"): lambda: self._accountant(query),
                 ("GET", "/report.csv"): lambda: self._report_csv(query),
                 ("GET", "/koinly"): lambda: self._koinly(query),
                 ("POST", "/koinly"): self._koinly_post,
@@ -639,6 +641,11 @@ def _handler_for(  # pylint: disable=too-many-statements
                 records_path=str(desk.records_path),
                 error=error,
             )
+
+        def _accountant(self, query: Mapping[str, List[str]]) -> None:
+            year = _year(_field(query, "tax_year"))
+            body = build_zip(desk, year)
+            self._send(200, body, "application/zip", f"accountant-{year}.zip")
 
         def _pack(self, query: Mapping[str, List[str]], pdf: bool) -> None:
             year = _year(_field(query, "tax_year"))
