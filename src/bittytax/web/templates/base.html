@@ -74,6 +74,10 @@
                         {{ ui.icon("list") }}
                         <span class="nav-label">Matches</span>
                     </a>
+                    <a href="/cost" {% if section == "cost" %}aria-current="page"{% endif %}>
+                        {{ ui.icon("report") }}
+                        <span class="nav-label">Cost basis</span>
+                    </a>
                     <a href="/review"
                        {% if section == "review" %}aria-current="page"{% endif %}>
                         {{ ui.icon("list") }}
